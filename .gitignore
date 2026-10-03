@@ -1,0 +1,48 @@
+# Python 编译缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# 系统临时文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# 编辑器与 IDE 配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 运行日志
+*.log
+web_server.log
+fetch_svgs.log
+
+# 用户上传的运行时字体及元数据
+data/custom_font.ttf
+data/custom_font_meta.json
+
+# SQLite 运行时临时事务文件
+*.db-wal
+*.db-shm
+*.db-journal
+
+# 原始未处理数据集
+data/raw/
+
+# SQLite 核心数据库文件
+# 说明：GitHub 限制单文件不得超过 100MB（hanzi.db 压缩后约为 156MB）。
+# 直接上传会被 GitHub 拦截。数据库建议通过 GitHub Releases 附件发布，
+# 或安装配置 Git LFS 后再进行跟踪（若使用 Git LFS 可注释此行）。
+data/*.db
