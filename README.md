@@ -26,7 +26,14 @@
 - Python 3.8+
 - SQLite 3
 
-### 启动服务
+### 1. 下载数据库文件
+从 GitHub Releases 下载预编译的全量字库 [hanzi.db](https://github.com/sheilacraig/HanziSearcher/releases/latest/download/hanzi.db)（约 156MB），放入 `data/` 目录：
+```bash
+mkdir -p data
+# 下载 hanzi.db 并放置于 data/hanzi.db
+```
+
+### 2. 启动服务
 默认监听端口为 `8088`。
 
 前台运行：
