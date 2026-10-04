@@ -29,6 +29,22 @@ STRUCT_ALIASES = [
     ("上下", "⿱"),
 ]
 
+def _escape_like(s: str) -> str:
+    """转义 SQL LIKE 通配符（配合 ESCAPE 子句使用）"""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _token_match(comp: str) -> Tuple[str, str]:
+    """
+    生成对 ids_tokens（逗号分隔部件列表）的整词匹配 (SQL 片段, 参数)。
+    通过给首尾补逗号并对 token 间空白做归一化，确保只命中完整的部件 token，
+    避免裸 LIKE '%x%' 造成的跨 token 子串误命中（如搜"丁"误中"町"的"田"）。
+    """
+    sql = "(',' || REPLACE(c.ids_tokens, ' ', '') || ',') LIKE ? ESCAPE '\\'"
+    param = f"%,{_escape_like(comp)},%"
+    return sql, param
+
+
 class HanziEngine:
     """汉字多模态检索引擎 (全功能增强版)"""
 
@@ -158,8 +174,9 @@ class HanziEngine:
         conditions = []
         params = []
         for comp in clean_comps:
-            conditions.append("c.ids_tokens LIKE ?")
-            params.append(f"%{comp}%")
+            comp_sql, comp_param = _token_match(comp)
+            conditions.append(comp_sql)
+            params.append(comp_param)
 
         if strokes is not None:
             conditions.append("c.total_strokes = ?")
@@ -316,10 +333,21 @@ class HanziEngine:
         cursor = conn.cursor()
 
         # 1. 查找上游直接父部件（过滤非汉字占位符如 ① ② α ℓ △ 等）
-        raw_tokens = [t.strip() for t in root_char["ids_tokens"].split(",") if t.strip() and t.strip() != char]
+        # 注：ids_tokens 可能为 NULL（无 IDS 数据的字），先做空值兜底再拆分
+        raw_tokens = [t.strip() for t in (root_char["ids_tokens"] or "").split(",")
+                      if t.strip() and t.strip() != char]
         parent_items = []
         for p in raw_tokens:
-            p_cp = ord(p[0])
+            if len(p) != 1:
+                # 多字符 token（如抽象部件标记）无法定位单一码位，仅作占位展示
+                parent_items.append({
+                    "character": p,
+                    "hex_code": None,
+                    "pinyin": None,
+                    "total_strokes": None
+                })
+                continue
+            p_cp = ord(p)
             # 过滤非标准汉字及非部首占位符（如带圈数字 0x2460~0x24FF，ASCII/符号 < 0x2E80 等）
             if p_cp < 0x2E80 or (0x2460 <= p_cp <= 0x24FF) or (0x3040 <= p_cp <= 0x30FF):
                 continue
@@ -342,15 +370,16 @@ class HanziEngine:
                 })
 
         # 2. 查找下游宗族衍生字（以此字为偏旁或部件的汉字，按笔画升序取前 48 个）
+        desc_sql, desc_param = _token_match(char)
         cursor.execute(f"""
             SELECT {self._select_fields()}
             FROM characters c
             LEFT JOIN character_variants v ON c.code_point = v.code_point
             LEFT JOIN character_svgs s ON c.code_point = s.code_point
-            WHERE c.ids_tokens LIKE ? AND c.code_point != ?
+            WHERE {desc_sql} AND c.code_point != ?
             ORDER BY c.total_strokes ASC, c.code_point ASC
             LIMIT 48
-        """, (f"%{char}%", cp))
+        """, (desc_param, cp))
         descendants = [self._format_row(r) for r in cursor.fetchall()]
 
         return {

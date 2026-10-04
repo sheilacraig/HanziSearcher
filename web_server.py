@@ -54,6 +54,24 @@ def save_font_meta(meta):
     with open(CUSTOM_FONT_META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
+
+def _int_arg(qs, key, default, lo=None, hi=None):
+    """
+    从 parse_qs 结果中安全解析整数参数：
+    - 非法输入（非数字、上标字符等 int() 无法解析的形式）回退默认值，绝不抛异常
+    - 可选范围钳制（lo/hi）
+    """
+    raw = qs.get(key, [str(default)])[0].strip()
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        val = default
+    if lo is not None and val < lo:
+        val = lo
+    if hi is not None and val > hi:
+        val = hi
+    return val
+
 def get_svg_from_db(code_param: str) -> str:
     """
     从 SQLite 本地库获取字形 SVG 矢量数据（100% 离线，无网络请求）
@@ -2021,10 +2039,16 @@ HTML_PAGE = """<!DOCTYPE html>
       triggerAutoSearch();
     }
 
+    // HTML 转义：所有动态文本写入 innerHTML 前必须经过此函数（XSS 防护，审查报告 P0-3）
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    let toastTimer = null;
     function showToast(msg) {
       toast.innerText = msg;
       toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 1600);
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 1600);
     }
 
     // 视图设置：米字格切换
@@ -2195,7 +2219,7 @@ HTML_PAGE = """<!DOCTYPE html>
         customFontGlyphs = new Set(meta.codepoints || []);
 
         fontStatusDot.className = 'font-pulse-dot active';
-        fontStatusTitle.innerHTML = `<span>🟢 自定义字体已就绪: <b>${customFontName}</b></span>`;
+        fontStatusTitle.innerHTML = `<span>🟢 自定义字体已就绪: <b>${esc(customFontName)}</b></span>`;
         fontStatusDesc.innerHTML = `已精准加载 <b>${customFontGlyphs.size}</b> 个字形。覆盖汉字优先字体呈现，缺失字形自动降级使用 SVG。`;
         resetFontBtn.style.display = 'inline-flex';
 
@@ -2285,7 +2309,7 @@ HTML_PAGE = """<!DOCTYPE html>
       const cp = char ? char.codePointAt(0) : 0;
       const hasGlyph = customFontActive && customFontGlyphs.has(cp);
       if (hasGlyph) {
-        return `<span class="source-badge badge-font" title="字形来源于自定义字体【${customFontName}】">🔤 字体</span>`;
+        return `<span class="source-badge badge-font" title="字形来源于自定义字体【${esc(customFontName)}】">🔤 字体</span>`;
       } else {
         return `<span class="source-badge badge-svg" title="字形来源于矢量 SVG 引擎直出">⚡ SVG</span>`;
       }
@@ -2758,22 +2782,45 @@ HTML_PAGE = """<!DOCTYPE html>
 """
 
 class HanziSearchHandler(BaseHTTPRequestHandler):
+    def _send_json(self, status, payload, extra_headers=None):
+        """统一 JSON 响应：带 Content-Length，避免非法参数打挂连接"""
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
 
     def do_GET(self):
+        try:
+            self._handle_get()
+        except BrokenPipeError:
+            pass
+        except Exception as e:
+            try:
+                self._send_json(500, {"error": f"服务内部错误: {e}"})
+            except Exception:
+                pass
+
+    def _handle_get(self):
         parsed = urllib.parse.urlparse(self.path)
 
         # 1. 字符检索 API (支持 q 与 strokes 组合及单独检索，每页 50 条，内联全部 50 个 SVG)
         if parsed.path == "/api/search":
             qs = urllib.parse.parse_qs(parsed.query)
             q = qs.get("q", [""])[0]
-            strokes_param = qs.get("strokes", [""])[0].strip()
-            strokes = int(strokes_param) if strokes_param.isdigit() else None
-            page = int(qs.get("page", [1])[0])
-            page_size = int(qs.get("page_size", [50])[0])
+            strokes = _int_arg(qs, "strokes", 0, lo=0, hi=99)
+            strokes = strokes if strokes > 0 else None
+            page = _int_arg(qs, "page", 1, lo=1)
+            page_size = _int_arg(qs, "page_size", 50, lo=1, hi=200)
 
             result = engine.smart_search(q, strokes=strokes, page=page, page_size=page_size)
 
@@ -2789,12 +2836,11 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             code = qs.get("code", [""])[0] or qs.get("char", [""])[0]
 
             family_data = engine.get_character_family(code)
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(family_data or {}, ensure_ascii=False).encode("utf-8"))
+            if family_data is None:
+                # 明确 404，前端据此提示"查无此字"，避免弹窗卡在加载态
+                self._send_json(404, {"error": "未找到该字的谱系数据"})
+            else:
+                self._send_json(200, family_data)
 
         # 3. 本地 SQLite 矢量 SVG 资源分发接口
         elif parsed.path == "/api/svg":
@@ -2916,6 +2962,17 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             self.wfile.write(HTML_PAGE.encode("utf-8"))
 
     def do_POST(self):
+        try:
+            self._handle_post()
+        except BrokenPipeError:
+            pass
+        except Exception as e:
+            try:
+                self._send_json(500, {"error": f"服务内部错误: {e}"})
+            except Exception:
+                pass
+
+    def _handle_post(self):
         parsed = urllib.parse.urlparse(self.path)
 
         # 1. 用户上传自定义字体接口 (直接接收文件二进制流)

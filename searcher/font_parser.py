@@ -128,7 +128,11 @@ def parse_font_file(file_path: str) -> Tuple[str, Set[int]]:
             try:
                 name_record = font["name"].getName(1, 3, 1) or font["name"].getName(4, 3, 1)
                 if name_record:
-                    font_name = name_record.toUnicode()
+                    raw_name = name_record.toUnicode()
+                    # 防御：仅保留可打印字符并限长，防止恶意字体名注入前端展示
+                    cleaned = "".join(ch for ch in raw_name if ch.isprintable())[:200].strip()
+                    if cleaned:
+                        font_name = cleaned
             except Exception:
                 pass
             return font_name, set(cmap.keys())
