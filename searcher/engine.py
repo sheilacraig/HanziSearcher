@@ -6,6 +6,7 @@
 import math
 import re
 import sqlite3
+import threading
 import zlib
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -50,13 +51,21 @@ class HanziEngine:
 
     def __init__(self, db_path: str = "data/hanzi.db"):
         self.db_path = db_path
-        self._conn = None
+        self._local = threading.local()
 
     def get_connection(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+        """
+        线程局部连接：配合 ThreadingHTTPServer 每个请求线程独享连接，
+        避免多线程共享同一 Connection 造成的游标错乱与递归使用异常。
+        引擎只做只读查询，统一开启 query_only 从根本上杜绝写竞争。
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only = 1")
+            self._local.conn = conn
+        return conn
 
     def _select_fields(self) -> str:
         return """
@@ -95,7 +104,11 @@ class HanziEngine:
                 code_point = int(hex_part, 16)
             except ValueError:
                 return None
-        elif re.fullmatch(r"[0-9A-Fa-f]{4,6}", code_str):
+        elif (len(code_str) in (4, 5, 6)
+              and re.fullmatch(r"[0-9A-Fa-f]{4,6}", code_str) is not None
+              and not code_str.isdigit()):
+            # 仅 4~6 位且含十六进制字母的才视为裸码位（如 690D）；
+            # 纯数字(如 2024)不再误判为 0x2024，落到下方十进制分支
             try:
                 code_point = int(code_str, 16)
             except ValueError:
@@ -371,6 +384,12 @@ class HanziEngine:
 
         # 2. 查找下游宗族衍生字（以此字为偏旁或部件的汉字，按笔画升序取前 48 个）
         desc_sql, desc_param = _token_match(char)
+        # 先单独统计真实总数（LIMIT 只截断列表，不能拿列表长度当总数）
+        cursor.execute(
+            f"SELECT count(*) FROM characters c WHERE {desc_sql} AND c.code_point != ?",
+            (desc_param, cp))
+        descendants_total = cursor.fetchone()[0]
+
         cursor.execute(f"""
             SELECT {self._select_fields()}
             FROM characters c
@@ -385,7 +404,7 @@ class HanziEngine:
         return {
             "root": root_char,
             "parents": parent_items,
-            "descendants_count": len(descendants),
+            "descendants_count": descendants_total,
             "descendants": descendants
         }
 
@@ -425,11 +444,13 @@ class HanziEngine:
                 "results": []
             }
 
-        # 2. 检查是否为显式码位字符串 (如 U+690D, 0x690D 或 4-6 位十六进制)
+        # 2. 检查是否为显式码位字符串 (如 U+690D, 0x690D 或 4-6 位含字母十六进制)
         is_explicit_code = (
             q.upper().startswith("U+") or
             q.lower().startswith("0x") or
-            (len(q) in (4, 5, 6) and bool(re.fullmatch(r"[0-9A-Fa-f]{4,6}", q)))
+            (len(q) in (4, 5, 6)
+             and bool(re.fullmatch(r"[0-9A-Fa-f]{4,6}", q))
+             and not q.isdigit())   # 纯数字不劫持，避免吞掉普通数字输入
         )
 
         if is_explicit_code:

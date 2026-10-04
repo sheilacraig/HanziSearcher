@@ -60,11 +60,12 @@ def extract_codepoints_from_bytes(font_bytes: bytes) -> Set[int]:
             _, _, length, lang, n_groups = struct.unpack(">HHIII", font_bytes[st_off:st_off+16])
             grp_off = st_off + 16
             for _ in range(n_groups):
-                if grp_off + 12 > len(font_bytes):
+                # 双重上限：合法码位不超 0x10FFFF；总量封顶防恶意字体声明超长区间导致 CPU 打满
+                if grp_off + 12 > len(font_bytes) or len(codepoints) > 300000:
                     break
                 start_c, end_c, start_g = struct.unpack(">III", font_bytes[grp_off:grp_off+12])
                 grp_off += 12
-                for cp in range(start_c, end_c + 1):
+                for cp in range(start_c, min(end_c, 0x10FFFF) + 1):
                     codepoints.add(cp)
 
         # Format 4: 16位段式映射 (用于 BMP 基本多文种平面)
@@ -116,28 +117,35 @@ def extract_codepoints_from_bytes(font_bytes: bytes) -> Set[int]:
 def parse_font_file(file_path: str) -> Tuple[str, Set[int]]:
     """
     解析字体文件并返回 (字体名称, 支持的 Unicode 码位集合)
-    优先尝试 fontTools，若未安装则自动回退至纯 Python 二进制解析
+    优先尝试 fontTools，若未安装或解析失败则自动回退至纯 Python 二进制解析
     """
     font_name = os.path.basename(file_path)
     try:
         from fontTools.ttLib import TTFont
-        font = TTFont(file_path)
-        cmap = font.getBestCmap()
-        if cmap:
-            # 尝试提取内部字体名称
-            try:
-                name_record = font["name"].getName(1, 3, 1) or font["name"].getName(4, 3, 1)
-                if name_record:
-                    raw_name = name_record.toUnicode()
-                    # 防御：仅保留可打印字符并限长，防止恶意字体名注入前端展示
-                    cleaned = "".join(ch for ch in raw_name if ch.isprintable())[:200].strip()
-                    if cleaned:
-                        font_name = cleaned
-            except Exception:
-                pass
-            return font_name, set(cmap.keys())
-    except Exception:
-        pass
+    except ImportError:
+        TTFont = None
+
+    if TTFont is not None:
+        try:
+            # 用 with 管理文件句柄：Windows 下句柄泄漏会导致后续覆盖写入失败
+            with open(file_path, "rb") as f:
+                font = TTFont(f)
+                cmap = font.getBestCmap()
+                if cmap:
+                    # 尝试提取内部字体名称
+                    try:
+                        name_record = font["name"].getName(1, 3, 1) or font["name"].getName(4, 3, 1)
+                        if name_record:
+                            raw_name = name_record.toUnicode()
+                            # 防御：仅保留可打印字符并限长，防止恶意字体名注入前端展示
+                            cleaned = "".join(ch for ch in raw_name if ch.isprintable())[:200].strip()
+                            if cleaned:
+                                font_name = cleaned
+                    except Exception:
+                        pass
+                    return font_name, set(cmap.keys())
+        except Exception:
+            pass
 
     # 回退到纯 Python 二进制提取
     with open(file_path, "rb") as f:

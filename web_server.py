@@ -23,9 +23,11 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import urllib.parse
 import zlib
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from contextlib import closing
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # 将当前目录加入模块路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +39,9 @@ engine = HanziEngine()
 DB_PATH = "data/hanzi.db"
 CUSTOM_FONT_PATH = "data/custom_font.ttf"
 CUSTOM_FONT_META_PATH = "data/custom_font_meta.json"
+MAX_FONT_BYTES = 100 * 1024 * 1024  # 上传字体大小上限 100MB，防内存耗尽
+_PROGRESS_CACHE = {"ts": 0.0, "data": None}
+_PROGRESS_CACHE_TTL = 60.0
 
 def load_font_meta():
     """读取已存储的自定义字体元数据"""
@@ -72,36 +77,39 @@ def _int_arg(qs, key, default, lo=None, hi=None):
         val = hi
     return val
 
+def _parse_code_param(code_param):
+    """
+    严格解析码位参数：单字符 / U+XXXX / 0xXXXX / 1~6 位纯十六进制。
+    无法解析时返回 None（不再宽松清洗任意字符串，避免"ZZ4E00"误命中 U+4E00）。
+    """
+    s = (code_param or "").strip()
+    if not s:
+        return None
+    if len(s) == 1:
+        return ord(s)
+    m = re.fullmatch(r"(?:[Uu]\+|0[xX])([0-9A-Fa-f]{1,6})", s)
+    if m:
+        return int(m.group(1), 16)
+    if re.fullmatch(r"[0-9A-Fa-f]{1,6}", s):
+        return int(s, 16)
+    return None
+
+
 def get_svg_from_db(code_param: str) -> str:
     """
     从 SQLite 本地库获取字形 SVG 矢量数据（100% 离线，无网络请求）
     兼容 Unicode 码位字符串 (如 'U+4E00', '4E00', 0x4E00) 与原始单字符 (如 '一')
     """
-    if not code_param:
+    cp = _parse_code_param(code_param)
+    if cp is None:
         return ""
-    code_param = code_param.strip()
+    full_hex = f"U+{cp:04X}"
 
-    if len(code_param) == 1 and not ('0' <= code_param <= '9' or 'a' <= code_param.lower() <= 'f'):
-        cp = ord(code_param)
-        hex_clean = f"{cp:04X}"
-    else:
-        hex_clean = re.sub(r"[^0-9A-Fa-f]", "", code_param).upper()
-        if not hex_clean:
-            cp = ord(code_param[0])
-            hex_clean = f"{cp:04X}"
-        else:
-            try:
-                cp = int(hex_clean, 16)
-            except ValueError:
-                cp = 0
-
-    full_hex = f"U+{hex_clean}"
-
-    conn = sqlite3.connect(DB_PATH, timeout=5)
-    cursor = conn.cursor()
-    cursor.execute("SELECT svg_data FROM character_svgs WHERE hex_code = ? OR code_point = ?", (full_hex, cp))
-    row = cursor.fetchone()
-    conn.close()
+    # closing 确保异常路径下连接也被释放，避免高频调用累积僵尸连接
+    with closing(sqlite3.connect(DB_PATH, timeout=5)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT svg_data FROM character_svgs WHERE hex_code = ? OR code_point = ?", (full_hex, cp))
+        row = cursor.fetchone()
 
     if row and row[0]:
         val = row[0]
@@ -112,6 +120,80 @@ def get_svg_from_db(code_param: str) -> str:
                 return ""
         return val
     return ""
+
+
+def _svg_progress_data():
+    """
+    归档进度统计（结果缓存 60 秒）。
+    每次统计需对 10 万行表跑 6 条 count(*)，全表扫描成本不低；
+    归档完成后数据基本不变，缓存可避免高频轮询打爆数据库。
+    """
+    now = time.time()
+    cached = _PROGRESS_CACHE["data"]
+    if cached is not None and now - _PROGRESS_CACHE["ts"] < _PROGRESS_CACHE_TTL:
+        return cached
+    try:
+        with closing(sqlite3.connect(DB_PATH, timeout=5)) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM character_svgs")
+            downloaded = cur.fetchone()[0]
+
+            cur.execute("SELECT count(*) FROM characters")
+            total = cur.fetchone()[0]
+            if total == 0:
+                total = 103047
+
+            cur.execute("SELECT count(*) FROM character_svgs WHERE code_point BETWEEN 19968 AND 40959")
+            base_downloaded = cur.fetchone()[0]
+
+            # 通用基础区 (U+4E00 ~ U+9FFF) 总字数动态统计
+            cur.execute("SELECT count(*) FROM characters WHERE code_point BETWEEN 19968 AND 40959")
+            base_total = cur.fetchone()[0]
+            if base_total == 0:
+                base_total = 20992
+
+            # 扩展区总字数动态统计
+            cur.execute("SELECT count(*) FROM characters WHERE code_point NOT BETWEEN 19968 AND 40959")
+            ext_total = cur.fetchone()[0]
+            if ext_total == 0:
+                ext_total = max(0, total - base_total)
+
+            cur.execute("SELECT count(*) FROM character_svgs WHERE code_point NOT BETWEEN 19968 AND 40959")
+            ext_downloaded = cur.fetchone()[0]
+
+        db_size_mb = 0
+        if os.path.exists(DB_PATH):
+            db_size_mb = round(os.path.getsize(DB_PATH) / (1024 * 1024), 1)
+
+        data = {
+            "total": total,
+            "downloaded": downloaded,
+            "remaining": max(0, total - downloaded),
+            "percent": round(downloaded / total * 100, 1) if total > 0 else 0,
+            "base_downloaded": base_downloaded,
+            "base_total": base_total,
+            "ext_downloaded": ext_downloaded,
+            "ext_total": ext_total,
+            "is_crawling": False,
+            "db_size_mb": db_size_mb
+        }
+    except Exception as e:
+        data = {
+            "total": 103047,
+            "downloaded": 0,
+            "remaining": 103047,
+            "percent": 0.0,
+            "base_downloaded": 0,
+            "base_total": 20992,
+            "ext_downloaded": 0,
+            "ext_total": 82055,
+            "is_crawling": False,
+            "db_size_mb": 0,
+            "error": str(e)
+        }
+    _PROGRESS_CACHE["ts"] = now
+    _PROGRESS_CACHE["data"] = data
+    return data
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2885,74 +2967,9 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
 
-        # 6. 矢量图库归档实时进度统计 API
+        # 6. 矢量图库归档实时进度统计 API (60 秒缓存)
         elif parsed.path == "/api/svg_progress":
-            try:
-                conn = sqlite3.connect(DB_PATH, timeout=5)
-                cur = conn.cursor()
-                cur.execute("SELECT count(*) FROM character_svgs")
-                downloaded = cur.fetchone()[0]
-
-                cur.execute("SELECT count(*) FROM characters")
-                total = cur.fetchone()[0]
-                if total == 0:
-                    total = 103047
-
-                cur.execute("SELECT count(*) FROM character_svgs WHERE code_point BETWEEN 19968 AND 40959")
-                base_downloaded = cur.fetchone()[0]
-
-                # 通用基础区 (U+4E00 ~ U+9FFF) 总字数动态统计
-                cur.execute("SELECT count(*) FROM characters WHERE code_point BETWEEN 19968 AND 40959")
-                base_total = cur.fetchone()[0]
-                if base_total == 0:
-                    base_total = 20992
-
-                # 扩展区总字数动态统计
-                cur.execute("SELECT count(*) FROM characters WHERE code_point NOT BETWEEN 19968 AND 40959")
-                ext_total = cur.fetchone()[0]
-                if ext_total == 0:
-                    ext_total = max(0, total - base_total)
-
-                cur.execute("SELECT count(*) FROM character_svgs WHERE code_point NOT BETWEEN 19968 AND 40959")
-                ext_downloaded = cur.fetchone()[0]
-                conn.close()
-
-                db_size_mb = 0
-                if os.path.exists(DB_PATH):
-                    db_size_mb = round(os.path.getsize(DB_PATH) / (1024 * 1024), 1)
-
-                data = {
-                    "total": total,
-                    "downloaded": downloaded,
-                    "remaining": max(0, total - downloaded),
-                    "percent": round(downloaded / total * 100, 1) if total > 0 else 0,
-                    "base_downloaded": base_downloaded,
-                    "base_total": base_total,
-                    "ext_downloaded": ext_downloaded,
-                    "ext_total": ext_total,
-                    "is_crawling": False,
-                    "db_size_mb": db_size_mb
-                }
-            except Exception as e:
-                data = {
-                    "total": 103047,
-                    "downloaded": 0,
-                    "remaining": 103047,
-                    "percent": 0.0,
-                    "base_downloaded": 0,
-                    "base_total": 20992,
-                    "ext_downloaded": 0,
-                    "ext_total": 82055,
-                    "is_crawling": False,
-                    "db_size_mb": 0,
-                    "error": str(e)
-                }
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            self._send_json(200, _svg_progress_data())
 
         # 7. 根页面
         else:
@@ -2981,11 +2998,11 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             filename = qs.get("filename", ["uploaded_font.ttf"])[0]
 
             content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > MAX_FONT_BYTES:
+                self._send_json(413, {"success": False, "error": f"字体文件过大（上限 {MAX_FONT_BYTES // (1024 * 1024)}MB）"})
+                return
             if content_length <= 0:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": "文件内容为空"}).encode("utf-8"))
+                self._send_json(400, {"success": False, "error": "文件内容为空"})
                 return
 
             font_data = self.rfile.read(content_length)
@@ -3040,7 +3057,10 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         pass
 
 def run_server(port: int = 8088):
-    server = HTTPServer(("127.0.0.1", port), HanziSearchHandler)
+    # ThreadingHTTPServer：每连接一线程，避免单线程串行排队卡住浏览器并发请求；
+    # daemon_threads 保证主进程退出时工作线程一并回收
+    server = ThreadingHTTPServer(("127.0.0.1", port), HanziSearchHandler)
+    server.daemon_threads = True
     print(f"============================================================")
     print(f"🏮 HanziSearcher Web 服务 (东方雅致与专业排印交互版) 已启动！")
     print(f"👉 访问地址: http://127.0.0.1:{port}")
