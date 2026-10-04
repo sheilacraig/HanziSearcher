@@ -2125,6 +2125,17 @@ HTML_PAGE = """<!DOCTYPE html>
     const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+    // 统一 fetch 封装：检查 HTTP 状态码，服务端 4xx/5xx 不再被伪装成"无结果"
+    async function fetchJson(url, opts) {
+      const res = await fetch(url, opts);
+      if (!res.ok) {
+        let detail = '';
+        try { const j = await res.json(); detail = j.error || ''; } catch (e) {}
+        throw new Error(`HTTP ${res.status}${detail ? '：' + detail : ''}`);
+      }
+      return res.json();
+    }
+
     let toastTimer = null;
     function showToast(msg) {
       toast.innerText = msg;
@@ -2278,8 +2289,7 @@ HTML_PAGE = """<!DOCTYPE html>
     // 字体管理与加载系统
     async function initFontSystem() {
       try {
-        const res = await fetch('/api/current_font');
-        const data = await res.json();
+        const data = await fetchJson('/api/current_font');
         if (data.has_font) {
           await applyFont(data);
         } else {
@@ -2335,11 +2345,10 @@ HTML_PAGE = """<!DOCTYPE html>
       fontStatusDesc.innerText = `正在解析并载入字体: ${file.name}...`;
 
       try {
-        const res = await fetch(`/api/upload_font?filename=${encodeURIComponent(file.name)}`, {
+        const data = await fetchJson(`/api/upload_font?filename=${encodeURIComponent(file.name)}`, {
           method: 'POST',
           body: file
         });
-        const data = await res.json();
         if (data.success) {
           await applyFont(data);
           showToast(`成功加载字体: ${data.font_name} (包含 ${data.glyph_count} 个字形)`);
@@ -2378,10 +2387,11 @@ HTML_PAGE = """<!DOCTYPE html>
     // 恢复默认 SVG 渲染
     async function resetToDefaultSvg() {
       try {
-        await fetch('/api/reset_font', { method: 'POST' });
+        await fetchJson('/api/reset_font', { method: 'POST' });
         setNoFontState();
         showToast('已恢复为默认 SVG 矢量直出模式');
       } catch (err) {
+        showToast('重置失败：' + err.message);
         setNoFontState();
       }
     }
@@ -2399,23 +2409,28 @@ HTML_PAGE = """<!DOCTYPE html>
 
     // 核心字形渲染生成器 (满足需求 1：优先字体，无字形/未上传时使用 SVG，米字格内部 100% 纯净无遮挡)
     // 关键优化：支持服务端单次检索直接返回的内联 SVG 数据，整页 50 个字形零额外网络请求瞬间直出！
+    // 事件通过 resultsGrid 委托 + data-copy 处理，不再生成内联 onclick（消除拼接注入面）
     function buildGlyphHtml(char, hexCode, svgData) {
       const cp = char ? char.codePointAt(0) : 0;
       const hasGlyph = customFontActive && customFontGlyphs.has(cp);
       const mzClass = showMizige ? 'with-mizige' : '';
-      const tooltip = hasGlyph ? `【${char}】由自定义字体渲染 (点击复制)` : `【${char}】由矢量 SVG 渲染 (点击复制)`;
+      const safeChar = esc(char);
+      const tooltip = hasGlyph
+        ? `【${char}】由自定义字体渲染 (点击复制)`
+        : `【${char}】由矢量 SVG 渲染 (点击复制)`;
 
       if (hasGlyph) {
         // 1. 优先使用字体渲染 (内部纯净，不放任何角标)
         return `
-          <div class="glyph-display is-font-glyph ${mzClass}" onclick="navigator.clipboard.writeText('${char}'); showToast('已复制字符: ${char}');" title="${tooltip}">
-            <span class="glyph-text-font">${char}</span>
+          <div class="glyph-display is-font-glyph ${mzClass}" data-copy="${safeChar}" title="${esc(tooltip)}">
+            <span class="glyph-text-font">${safeChar}</span>
           </div>
         `;
       } else if (svgData) {
         // 2. 数据库一次性返回内联 SVG：直接内联渲染，整页零额外网络请求！
+        //    SVG 来自本地可信字库，需保持原始标签结构不做转义
         return `
-          <div class="glyph-display is-svg-glyph ${mzClass}" onclick="navigator.clipboard.writeText('${char}'); showToast('已复制字符: ${char}');" title="${tooltip}">
+          <div class="glyph-display is-svg-glyph ${mzClass}" data-copy="${safeChar}" title="${esc(tooltip)}">
             ${svgData}
           </div>
         `;
@@ -2423,19 +2438,29 @@ HTML_PAGE = """<!DOCTYPE html>
         // 3. 极罕见生僻字未缓存时，自动降级图片拉取
         const localSvgUrl = `/api/svg?code=${encodeURIComponent(hexCode)}`;
         return `
-          <div class="glyph-display is-svg-glyph ${mzClass}" onclick="navigator.clipboard.writeText('${char}'); showToast('已复制字符: ${char}');" title="${tooltip}">
-            <img class="glyph-svg" src="${localSvgUrl}" alt="${char}" 
+          <div class="glyph-display is-svg-glyph ${mzClass}" data-copy="${safeChar}" title="${esc(tooltip)}">
+            <img class="glyph-svg" src="${localSvgUrl}" alt="${safeChar}" 
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-            <span class="glyph-text-fallback">${char}</span>
+            <span class="glyph-text-fallback">${safeChar}</span>
           </div>
         `;
       }
     }
 
     // 综合检索函数 (支持 单独检索框、单独总笔画数、组合检索)
+    let searchSeq = 0;   // 请求序号守卫：过期响应直接丢弃，防止慢响应覆盖新结果
     async function doSearch(page = 1) {
       const q = searchInput.value.trim();
-      const strokes = strokesInput.value.trim();
+      const strokesRaw = strokesInput.value.trim();
+
+      // 笔画输入校验：非法值明确提示，不再静默忽略变成全量检索
+      const strokesOk = !strokesRaw ||
+        (strokesRaw.length <= 2 && Array.from(strokesRaw).every(c => c >= '0' && c <= '9'));
+      if (!strokesOk) {
+        statusText.innerText = '笔画数请输入 1~99 的整数';
+        return;
+      }
+      const strokes = strokesRaw;
 
       // 两者皆空时清空视图
       if (!q && !strokes) {
@@ -2446,14 +2471,15 @@ HTML_PAGE = """<!DOCTYPE html>
         return;
       }
 
+      const seq = ++searchSeq;
       statusText.innerText = '正在检索中...';
       try {
         let apiUrl = `/api/search?page=${page}&page_size=${pageSize}`;
         if (q) apiUrl += `&q=${encodeURIComponent(q)}`;
         if (strokes) apiUrl += `&strokes=${encodeURIComponent(strokes)}`;
 
-        const res = await fetch(apiUrl);
-        const data = await res.json();
+        const data = await fetchJson(apiUrl);
+        if (seq !== searchSeq) return;   // 已有更新的请求，丢弃本次过期响应
 
         currentResults = data.results || [];
         currentPage = data.page || 1;
@@ -2475,7 +2501,7 @@ HTML_PAGE = """<!DOCTYPE html>
         renderCards(currentResults);
         renderPagination();
       } catch (err) {
-        statusText.innerText = '检索出错，请检查服务端连接';
+        if (seq === searchSeq) statusText.innerText = '检索出错：' + err.message;
       }
     }
 
@@ -2493,10 +2519,10 @@ HTML_PAGE = """<!DOCTYPE html>
         const pinyin = r.pinyin ? `[${r.pinyin}]` : '';
         const strokes = r.total_strokes ? `${r.total_strokes} 画` : '未知';
 
-        // 部件反向穿透交互标签
-        const tokensHtml = rawTokens.split(',').filter(t => t.trim()).map(t => 
-          `<span class="comp-chip" onclick="drillComponent('${t.trim()}')" title="穿透检索含【${t.trim()}】的汉字">${t.trim()}</span>`
-        ).join(' ');
+        // 部件反向穿透交互标签（data-comp + 事件委托，不再拼接内联 onclick）
+        const tokensHtml = rawTokens.split(',').map(t => t.trim()).filter(t => t)
+          .map(t => `<span class="comp-chip" data-comp="${esc(t)}" title="穿透检索含【${esc(t)}】的汉字">${esc(t)}</span>`)
+          .join(' ');
 
         // 简繁与异体字流变展示
         const trad = r.traditional || '';
@@ -2505,13 +2531,16 @@ HTML_PAGE = """<!DOCTYPE html>
 
         let variantsHtml = '';
         if (trad) {
-          variantsHtml += `<span class="var-tag var-trad" onclick="drillComponent('${trad.split(' ')[0]}')" title="繁体: ${trad}">繁: ${trad.split(' ')[0]}</span>`;
+          const t0 = trad.split(' ')[0];
+          variantsHtml += `<span class="var-tag var-trad" data-comp="${esc(t0)}" title="繁体: ${esc(trad)}">繁: ${esc(t0)}</span>`;
         }
         if (sem) {
-          variantsHtml += `<span class="var-tag var-sem" onclick="drillComponent('${sem.split(' ')[0]}')" title="异体/古字: ${sem}">异: ${sem.split(' ')[0]}</span>`;
+          const s0 = sem.split(' ')[0];
+          variantsHtml += `<span class="var-tag var-sem" data-comp="${esc(s0)}" title="异体/古字: ${esc(sem)}">异: ${esc(s0)}</span>`;
         }
         if (simp && simp.split(' ')[0] !== char) {
-          variantsHtml += `<span class="var-tag var-trad" onclick="drillComponent('${simp.split(' ')[0]}')" title="简体: ${simp}">简: ${simp.split(' ')[0]}</span>`;
+          const p0 = simp.split(' ')[0];
+          variantsHtml += `<span class="var-tag var-trad" data-comp="${esc(p0)}" title="简体: ${esc(simp)}">简: ${esc(p0)}</span>`;
         }
 
         const glyphDisplayHtml = buildGlyphHtml(char, hex, r.svg_data);
@@ -2523,22 +2552,22 @@ HTML_PAGE = """<!DOCTYPE html>
             <div class="char-meta">
               <div class="char-header">
                 <div style="display:flex; align-items:center; gap:8px;">
-                  <span class="char-code" onclick="navigator.clipboard.writeText('${hex}'); showToast('已复制码位: ${hex}');" title="点击复制码位">
-                    ${hex}
+                  <span class="char-code" data-hex="${esc(hex)}" title="点击复制码位">
+                    ${esc(hex)}
                   </span>
                   ${sourceBadgeHtml}
                 </div>
-                <button class="probe-btn" onclick="openFamilyModal('${char}', '${hex}')" title="打开血缘探针与谱系">🌳 血缘探针</button>
+                <button class="probe-btn" data-char="${esc(char)}" data-hex="${esc(hex)}" title="打开血缘探针与谱系">🌳 血缘探针</button>
               </div>
               <div class="char-prop">
                 <span class="label">结构:</span>
-                <b>${ids}</b>
+                <b>${esc(ids)}</b>
                 ${tokensHtml ? `<span style="margin-left:4px;">${tokensHtml}</span>` : ''}
               </div>
               <div class="char-prop">
                 <span class="label">属性:</span>
-                <span class="stroke-badge">${strokes}</span>
-                ${pinyin ? `<span class="pinyin-badge">${pinyin}</span>` : ''}
+                <span class="stroke-badge">${esc(strokes)}</span>
+                ${pinyin ? `<span class="pinyin-badge">${esc(pinyin)}</span>` : ''}
               </div>
               ${variantsHtml ? `<div class="variants-line">${variantsHtml}</div>` : ''}
             </div>
@@ -2546,6 +2575,33 @@ HTML_PAGE = """<!DOCTYPE html>
         `;
       }).join('');
     }
+
+    // 结果网格事件委托：统一处理字形复制 / 码位复制 / 血缘探针 / 部件穿透
+    resultsGrid.addEventListener('click', (e) => {
+      const glyph = e.target.closest('.glyph-display');
+      if (glyph && glyph.dataset.copy) {
+        navigator.clipboard.writeText(glyph.dataset.copy)
+          .then(() => showToast('已复制字符: ' + glyph.dataset.copy))
+          .catch(() => showToast('复制失败，请手动选择'));
+        return;
+      }
+      const codeEl = e.target.closest('.char-code');
+      if (codeEl && codeEl.dataset.hex) {
+        navigator.clipboard.writeText(codeEl.dataset.hex)
+          .then(() => showToast('已复制码位: ' + codeEl.dataset.hex))
+          .catch(() => showToast('复制失败，请手动选择'));
+        return;
+      }
+      const probe = e.target.closest('.probe-btn');
+      if (probe && probe.dataset.char) {
+        openFamilyModal(probe.dataset.char, probe.dataset.hex || '');
+        return;
+      }
+      const chip = e.target.closest('.comp-chip, .var-tag');
+      if (chip && chip.dataset.comp) {
+        drillComponent(chip.dataset.comp);
+      }
+    });
 
     function renderPagination() {
       if (totalPages <= 1) {
@@ -2639,24 +2695,36 @@ HTML_PAGE = """<!DOCTYPE html>
       familyModal.style.display = 'flex';
 
       try {
-        const res = await fetch(`/api/family?code=${encodeURIComponent(hex)}`);
-        const data = await res.json();
+        const data = await fetchJson(`/api/family?code=${encodeURIComponent(hex)}`);
+
+        // 判空守卫：后端已改为 404，此处兜底防 200+空体导致渲染崩溃
+        if (!data || !data.root) {
+          modalMeta.innerText = `未找到 ${hex} 对应的谱系数据`;
+          modalParents.innerHTML = '<span style="color:#999;">无谱系数据</span>';
+          modalVariants.innerHTML = '<span style="color:#999;">无谱系数据</span>';
+          modalDescendants.innerHTML = '<span style="color:#999;">无谱系数据</span>';
+          return;
+        }
+
         renderFamilyTree(data);
 
         // 如果未命中自定义字体，优先采用后端一次性返回的内联 svg_data
         if (!hasGlyph) {
-          if (data.root && data.root.svg_data) {
+          if (data.root.svg_data) {
             modalGlyph.innerHTML = data.root.svg_data;
           } else {
             modalGlyph.innerHTML = `
-              <img class="glyph-svg" src="/api/svg?code=${encodeURIComponent(hex)}" alt="${char}" 
+              <img class="glyph-svg" src="/api/svg?code=${encodeURIComponent(hex)}" alt="${esc(char)}" 
                    onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-              <span class="glyph-text-fallback" style="font-size:60px;">${char}</span>
+              <span class="glyph-text-fallback" style="font-size:60px;">${esc(char)}</span>
             `;
           }
         }
       } catch (err) {
-        modalVariants.innerHTML = '网络请求失败';
+        modalMeta.innerText = `${hex} 谱系加载失败`;
+        modalParents.innerHTML = '<span style="color:#999;">无谱系数据</span>';
+        modalVariants.innerHTML = '请求失败：' + esc(err.message);
+        modalDescendants.innerHTML = '<span style="color:#999;">无谱系数据</span>';
       }
     }
 
@@ -2675,28 +2743,21 @@ HTML_PAGE = """<!DOCTYPE html>
 
     // 矢量图库归档进度模态弹窗控制与数据拉取
     const progressModal = document.getElementById('progressModal');
-    let progressTimer = null;
 
+    // 归档数据基本恒定（is_crawling 恒为 False），打开时拉取一次即可；
+    // 需要最新数据可点弹窗内"刷新数据"按钮，不再 3 秒轮询打数据库
     function openProgressModal() {
       progressModal.style.display = 'flex';
       fetchSvgProgress(true);
-      if (!progressTimer) {
-        progressTimer = setInterval(() => fetchSvgProgress(false), 3000);
-      }
     }
 
     function closeProgressModal() {
       progressModal.style.display = 'none';
-      if (progressTimer) {
-        clearInterval(progressTimer);
-        progressTimer = null;
-      }
     }
 
     async function fetchSvgProgress(showToastTip) {
       try {
-        const res = await fetch('/api/svg_progress');
-        const data = await res.json();
+        const data = await fetchJson('/api/svg_progress');
 
         // 更新顶部 Header 胶囊徽章与状态呼吸灯
         const badge = document.getElementById('headerProgressBadge');
@@ -2764,6 +2825,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     function renderFamilyTree(fam) {
       const root = fam.root;
+      if (!root) return;   // 防御：调用方已判空，此处再兜一层
       modalMeta.innerText = `Unicode: ${root.hex_code} | 结构: ${root.ids_direct || '独体'} | 总笔画: ${root.total_strokes || '未知'} 画 | ${root.pinyin ? '拼音: ' + root.pinyin : ''}`;
 
       // 1. 父部件渲染 (直接展示部件纯净小字形或SVG)
@@ -2776,22 +2838,23 @@ HTML_PAGE = """<!DOCTYPE html>
           const sub = (typeof p === 'object' && p.pinyin) ? p.pinyin : '构架构件';
           const pCp = char.codePointAt(0);
           const pHasFont = customFontActive && customFontGlyphs.has(pCp);
+          const safeChar = esc(char);
 
           let pIcon = '';
           if (pHasFont) {
-            pIcon = `<span style="font-size:26px; font-family:'UserCustomFont', var(--font-serif);">${char}</span>`;
+            pIcon = `<span style="font-size:26px; font-family:'UserCustomFont', var(--font-serif);">${safeChar}</span>`;
           } else {
-            pIcon = `<img src="/api/svg?code=${encodeURIComponent(hex)}" alt="${char}" style="width:28px; height:28px; object-fit:contain;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><span style="display:none; font-size:20px;">${char}</span>`;
+            pIcon = `<img src="/api/svg?code=${encodeURIComponent(hex)}" alt="${safeChar}" style="width:28px; height:28px; object-fit:contain;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><span style="display:none; font-size:20px;">${safeChar}</span>`;
           }
 
           return `
-            <div class="parent-pill" onclick="closeFamilyModal(); drillComponent('${char}');" title="点击穿透检索【${char}】(${hex})家族">
+            <div class="parent-pill" data-comp="${safeChar}" title="点击穿透检索【${safeChar}】(${esc(hex)})家族">
               <div style="width:30px; height:30px; display:flex; align-items:center; justify-content:center;">
                 ${pIcon}
               </div>
               <div>
-                <b style="font-size:16px;">${char}</b>
-                <div style="font-size:11px; color:#888;">${sub}</div>
+                <b style="font-size:16px;">${safeChar}</b>
+                <div style="font-size:11px; color:#888;">${esc(sub)}</div>
               </div>
             </div>
           `;
@@ -2801,16 +2864,16 @@ HTML_PAGE = """<!DOCTYPE html>
       // 2. 简繁与异体字流变渲染
       let varRows = [];
       if (root.traditional) {
-        varRows.push(`<div><b>传统繁体:</b> <span style="color:#d35400;">${root.traditional}</span></div>`);
+        varRows.push(`<div><b>传统繁体:</b> <span style="color:#d35400;">${esc(root.traditional)}</span></div>`);
       }
       if (root.simplified) {
-        varRows.push(`<div><b>规范简体:</b> <span style="color:#27ae60;">${root.simplified}</span></div>`);
+        varRows.push(`<div><b>规范简体:</b> <span style="color:#27ae60;">${esc(root.simplified)}</span></div>`);
       }
       if (root.semantic) {
-        varRows.push(`<div><b>异体 / 古体字:</b> <span style="color:#8e44ad;">${root.semantic}</span></div>`);
+        varRows.push(`<div><b>异体 / 古体字:</b> <span style="color:#8e44ad;">${esc(root.semantic)}</span></div>`);
       }
       if (root.z_variant) {
-        varRows.push(`<div><b>笔形变体:</b> <span style="color:#2980b9;">${root.z_variant}</span></div>`);
+        varRows.push(`<div><b>笔形变体:</b> <span style="color:#2980b9;">${esc(root.z_variant)}</span></div>`);
       }
       modalVariants.innerHTML = varRows.length > 0 ? varRows.join('') : '<span style="color:#999;">该字无直接简繁或语义异体流变记录</span>';
 
@@ -2822,31 +2885,56 @@ HTML_PAGE = """<!DOCTYPE html>
           const subText = d.pinyin || (d.total_strokes ? `${d.total_strokes}画` : d.hex_code);
           const cp = d.character.codePointAt(0);
           const hasFont = customFontActive && customFontGlyphs.has(cp);
+          const safeChar = esc(d.character);
 
           let innerBox = '';
           if (hasFont) {
-            innerBox = `<span style="font-size:30px; font-family:'UserCustomFont', var(--font-serif); line-height:44px;">${d.character}</span>`;
+            innerBox = `<span style="font-size:30px; font-family:'UserCustomFont', var(--font-serif); line-height:44px;">${safeChar}</span>`;
           } else if (d.svg_data) {
             innerBox = d.svg_data;
           } else {
             innerBox = `
-              <img src="/api/svg?code=${encodeURIComponent(d.hex_code)}" alt="${d.character}" 
+              <img src="/api/svg?code=${encodeURIComponent(d.hex_code)}" alt="${safeChar}" 
                    onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-              <div style="display:none; font-size:24px;">${d.character}</div>
+              <div style="display:none; font-size:24px;">${safeChar}</div>
             `;
           }
 
           return `
-            <div class="descendant-card" onclick="openFamilyModal('${d.character}', '${d.hex_code}')" title="${d.character} (${d.hex_code})&#10;拼音: ${d.pinyin || '无'}&#10;笔画: ${d.total_strokes || '未知'}画&#10;结构: ${d.ids_direct || '未知'}&#10;点击探针此字">
+            <div class="descendant-card" data-char="${safeChar}" data-hex="${esc(d.hex_code)}" title="${safeChar} (${esc(d.hex_code)})&#10;拼音: ${esc(d.pinyin || '无')}&#10;笔画: ${esc(d.total_strokes || '未知')}画&#10;结构: ${esc(d.ids_direct || '未知')}&#10;点击探针此字">
               <div class="descendant-glyph-box">
                 ${innerBox}
               </div>
-              <span class="descendant-meta">${subText}</span>
+              <span class="descendant-meta">${esc(subText)}</span>
             </div>
           `;
         }).join('');
       }
     }
+
+    // 血缘弹窗事件委托：父部件穿透 / 后裔字探针
+    modalParents.addEventListener('click', (e) => {
+      const pill = e.target.closest('.parent-pill');
+      if (pill && pill.dataset.comp) {
+        closeFamilyModal();
+        drillComponent(pill.dataset.comp);
+      }
+    });
+
+    modalDescendants.addEventListener('click', (e) => {
+      const card = e.target.closest('.descendant-card');
+      if (card && card.dataset.char) {
+        openFamilyModal(card.dataset.char, card.dataset.hex || '');
+      }
+    });
+
+    // ESC 关闭任意已打开的模态弹窗
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (familyModal.style.display === 'flex') { closeFamilyModal(); return; }
+      if (settingsModal.style.display === 'flex') { closeSettingsModal(); return; }
+      if (progressModal.style.display === 'flex') { closeProgressModal(); return; }
+    });
 
     // 初始化运行
     initToolbox();
