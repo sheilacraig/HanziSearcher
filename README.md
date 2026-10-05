@@ -76,24 +76,91 @@ mkdir -p data
 .venv/bin/python web_server.py 8088
 ```
 
-**后台运行**：
+**指定监听地址**（部署公网时使用）：
 ```bash
-nohup .venv/bin/python web_server.py 8088 > web_server.log 2>&1 &
+# 默认仅本机可访问
+python web_server.py 8088
+
+# 监听所有网卡（公网部署）
+python web_server.py 8088 --host 0.0.0.0
 ```
 
 **访问入口**：
 - **汉字检索主页**：[http://127.0.0.1:8088/](http://127.0.0.1:8088/)
   - 支持多维拆字部件检索、汉字血缘探针、字体覆盖率测试。
-  - 顶部导航可直达“🧱 汉字乐高”；每张汉字检索卡片支持点击“🧱 乐高”携带字符直达拆解工作台。
+  - 顶部导航可直达「🧱汉字乐高」与「📖 字表」；每张汉字检索卡片支持点击「🧱 乐高」携带字符直达拆解工作台。
 - **汉字乐高独立工作台**：[http://127.0.0.1:8088/lego](http://127.0.0.1:8088/lego)
   - 全屏沉浸式拼字工作台，支持一级原子骨架与任意槽位自由子骨架嵌套、造字库管理与宣纸档案卡导出。
-  - 顶部导航可一键直达“🔍 汉字检索”主页。
+  - 顶部导航可一键直达「🔍 汉字检索」与「📖 字表」。
   - 支持 URL 深度联动：`?char=<字>`（自动提取零件）、`?load=<id>`（自动装载自造字档案）。
+- **汉字字表落地页**：[http://127.0.0.1:8088/chars](http://127.0.0.1:8088/chars)
+  - 服务端渲染的全量汉字字表，可按笔画（`?stroke=8`）筛选、分页浏览。
+  - 每字含拼音、笔画数、部首、IDS 结构与Unicode 码位，条目均为真实可抓取的内部链接。
 
 **停止后台服务**：
 ```bash
 kill $(lsof -t -i :8088)
 ```
+
+---
+
+## 🔍 SEO 与搜索引擎收录
+
+服务端渲染的 SEO 元数据集中在 `server/seo.py`，页面渲染逻辑在 `server/seo_pages.py`。
+
+### 部署到公网前必须做的一步
+
+编辑 `server/seo.py` 顶部的 `BASE_URL`：
+
+```python
+BASE_URL = "https://你的域名.com"   # 默认为None（本地开发）
+```
+
+改这一个值即可，canonical、og:url、og:image、sitemap、robots 的 `Sitemap:` 行全部自动派生为绝对地址。
+
+> 未配置 `BASE_URL` 时：meta 中的 canonical 为相对路径（不影响本地调试），
+> 而 `/sitemap.xml` 会返回 **404** ——因为相对路径的 sitemap 会被搜索引擎直接拒绝，
+> 不如明确告知「暂不可用」。
+
+### 已实现的 SEO 能力
+
+| 能力 | 说明 |
+| :--- | :--- |
+| 元标签 | `title` / `description` / `keywords` / `robots` / `canonical` |
+| Open Graph | `og:type` / `title` / `description` / `url` / `image` / `locale`，微信、微博、Facebook 分享卡片依赖 |
+| Twitter Card | `summary_large_image` |
+| JSON-LD | `WebSite` + `SearchAction` + `WebApplication`，仅对爬虫 UA 注入以减小体积 |
+| `robots.txt` | 放行 `/`、`/chars`、`/lego`；屏蔽 `/api/` 与查询串，避免浪费抓取预算 |
+| `sitemap.xml` | 3 个主页面 + 51 个笔画分片共 54 条URL |
+| OG 预览图 | `/static/og-cover.svg` 服务端动态生成，无需外部图片资源 |
+| 字表落地页 | `/chars`、`/chars?stroke=N`、`/chars?page=N` 均为服务端渲染的真实汉字内容 |
+| 爬虫识别 | 按 UA 区分爬虫与浏览器（`server/seo.py::is_crawler`） |
+
+### 爬虫视角与浏览器视角的差异
+
+爬虫（百度、Google、Bing、搜狗、360、神马、头条等）访问时会额外获得：
+
+- `application/ld+json` 结构化数据
+- 完整 canonical 与 OG 标签
+
+浏览器访问时看到的是原有的交互页面，两种视角互不影响。
+
+### 内部链接结构（权重传递）
+
+```
+/            ├──> /lego
+             └──> /chars  ├──> /chars?stroke=1 ... /chars?stroke=64
+                            └──> /?q=<单字>  (每个汉字卡片一条)
+```
+
+`/chars` 页面底部含56 条笔画筛选链接，每个汉字卡片又是指向对应检索页的真实链接，
+爬虫可沿这些链接遍历整个字库。
+
+### 当前限制（如实说明）
+
+- 服务默认仅监听 `127.0.0.1`，**不配置 `--host 0.0.0.0` 与域名则无法被公网爬虫访问**。
+- 字表分页上限 5000 页，`?page=` 超出后按末页处理，避免超长爬取。
+- 本项目的核心交互（检索、乐高）仍依赖 JS，爬虫无法操作，只能通过 `/chars` 落地页获取内容。
 
 ---
 
@@ -147,9 +214,20 @@ kill $(lsof -t -i :8088)
 
 ### 5. 自定义字体管理
 - **上传字体**：`POST /api/upload_font?filename=<name>`（Body 为字体文件二进制流）
+  - 支持 TTF / OTF / WOFF / **TTC 字体集合**；cmap 为空的文件返回 400 且不落地
 - **获取当前字体状态**：`GET /api/current_font`
 - **获取当前字体文件**：`GET /api/font_file`
 - **恢复默认设置**：`POST /api/reset_font`
+
+### 6. SEO 路由
+
+- **`GET /chars`**（别名 `/chars.html`）
+  - 参数：`page`（页码，默认 1，上限 5000）、`stroke`（笔画数 1~64，可选）
+  - 返回：服务端渲染的 HTML 字表页，含 60 个汉字卡片（拼音 / 笔画 / 部首 / IDS / 码位）
+  - 每页响应约 25KB，不含 SVG 矢量数据
+- **`GET /robots.txt`** — 抓取策略与 sitemap 声明
+- **`GET /sitemap.xml`** — 54 条 URL（3 主页面 + 51 笔画分片）；未配置 `BASE_URL` 时返回 404
+- **`GET /static/og-cover.svg`** — 服务端动态生成的社交分享预览图
 
 
 
@@ -159,17 +237,20 @@ kill $(lsof -t -i :8088)
 
 ```text
 .
-├── web_server.py         # HTTP 服务轻量化启动入口 (纯启动脚本，锚定工作目录到项目根)
+├── web_server.py         # HTTP 服务启动入口 (argparse 支持 --port / --host)
 ├── server/               # 服务端核心业务逻辑
 │   ├── handlers.py       # HTTP 请求路由分发、API 处理器与静态资源托管
-│   └── font_manager.py   # 自定义字体持久化管理与元数据读写
+│   ├── font_manager.py   # 自定义字体持久化管理与元数据读写
+│   ├── seo.py            # SEO 配置与 meta / robots / sitemap 生成
+│   └── seo_pages.py      # SEO 页面渲染（/ 与 /lego 注入元标签、/chars 字表落地页）
 ├── searcher/             # 检索与构字引擎
 │   ├── __init__.py       # 模块包导出
 │   ├── engine.py         # 智能检索、汉字拆解机、常用部首库、构件索引与异体字处理
-│   └── font_parser.py    # 字体 cmap 二进制解析与字符覆盖率计算
+│   └── font_parser.py    # 字体 cmap 二进制解析（TTF/OTF/WOFF/TTC）与字符覆盖率计算
 ├── templates/            # 前端页面模板
 │   ├── index.html        # 汉字检索与部件探针主页面 (/)
-│   └── lego.html         # 汉字乐高独立工作台页面 (/lego)
+│   ├── lego.html         # 汉字乐高独立工作台页面 (/lego)
+│   └── chars.html        # SEO 汉字字表落地页 (/chars)
 ├── static/               # 前端静态工程资源
 │   ├── css/
 │   │   ├── style.css     # 主站全局样式、卡片网格、弹窗与响应式设计
@@ -178,12 +259,56 @@ kill $(lsof -t -i :8088)
 │       ├── app.js        # 检索交互、分页、字体管理、谱系模态弹窗控制与直达乐高联动
 │       └── lego.js       # 汉字乐高核心引擎 (几何变换、自由骨架嵌套、IDS 递归、造字库与导出)
 ├── data/
-│   └── hanzi.db          # SQLite 全量字库 (内联 zlib 压缩，约 156MB)
+│   └── hanzi.db          # SQLite 全量字库 (内联zlib 压缩，约 156MB)
 │       ├── characters         # 103,047 条汉字基础元数据
-│       ├── character_svgs     # 103,047 条离线 SVG 矢量数据 (压缩 BLOB)
+│       ├── character_svgs# 103,047 条离线 SVG 矢量数据 (压缩 BLOB)
 │       └── character_variants # 16,825 条简繁及异体字关联数据
 └── README.md             # 工程说明文档
 ```
+
+---
+
+## 🔍 SEO 与搜索引擎收录
+
+SEO 元数据集中在 `server/seo.py`，页面渲染逻辑在 `server/seo_pages.py`。
+
+### 部署到公网前必做的一步
+
+编辑 `server/seo.py` 顶部的 `BASE_URL`：
+
+```python
+BASE_URL = "https://你的域名.com"   # 默认为 None（本地开发）
+```
+
+改这一个值，canonical / og:url / og:image / sitemap / robots 的 `Sitemap:` 行全部自动派生。
+
+### 已实现的能力
+
+| 能力 | 说明 |
+| :--- | :--- |
+| 元标签 | `title` / `description` / `keywords` / `robots` / `canonical` |
+| Open Graph | `og:*` 全套，微信 /微博 / Facebook 分享卡片依赖 |
+| Twitter Card | `summary_large_image` |
+| JSON-LD | `WebSite` + `SearchAction` + `WebApplication`，仅对爬虫 UA 注入 |
+| `robots.txt` | 放行 `/`、`/chars`、`/lego`；屏蔽 `/api/` 与查询串 |
+| `sitemap.xml` | 3 个主页面 + 51 个笔画分片，共 54 条 URL |
+| OG 预览图 | `/static/og-cover.svg` 服务端动态生成 |
+| 字表落地页 | `/chars`、`?stroke=N`、`?page=N` 均服务端渲染真实汉字 |
+
+### 内部链接结构（权重传递）
+
+```
+/            ├──> /lego
+             └──> /chars  ├──> /chars?stroke=1 ... /chars?stroke=64
+                            └──> /?q=<单字>（每个汉字卡片一条）
+```
+
+### 当前限制（如实说明）
+
+- 服务默认仅监听 `127.0.0.1`，**不配置 `--host 0.0.0.0` 与域名则无法被公网爬虫访问**。
+- 未配置 `BASE_URL` 时 `/sitemap.xml` 返回 404 —— 相对路径的 sitemap 会被搜索引擎拒绝。
+- 字表分页上限 5000 页，超出按末页处理。
+- 核心交互（检索、乐高）仍依赖 JS，爬虫无法操作，只能通过 `/chars` 落地页获取内容。
 
 ---
 

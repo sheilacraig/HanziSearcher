@@ -6,12 +6,16 @@ Web 请求处理与 API 路由分发模块
 import json
 import mimetypes
 import os
+import re
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 from searcher.engine import HanziEngine
 from searcher.font_parser import parse_font_file
+from server import seo
+from server import seo_pages
+from server.seo import build_robots, build_sitemap
 from server.font_manager import (
     CUSTOM_FONT_PATH,
     CUSTOM_FONT_META_PATH,
@@ -25,10 +29,92 @@ DB_PATH = "data/hanzi.db"
 TEMPLATES_DIR = "templates"
 STATIC_DIR = "static"
 
-# 允许的跨域来源白名单：仅本机自身来源。
+# 允许的跨域来源白名单。
 # 历史问题：无条件下发 Access-Control-Allow-Origin: * 且 do_OPTIONS 主动放行预检，
 # 任意第三方网页可对本机端口发起跨域 fetch，从而静默覆盖 / 删除用户字体文件。
-ALLOWED_ORIGIN_PREFIXES = ("http://127.0.0.1", "http://localhost")
+#
+# 必须包含站点自身域名（BASE_URL）：页面内的 fetch / XHR 会携带 Origin 头，
+# 若白名单只列127.0.0.1 与 localhost，部署上线后自身请求会被 403 拦死，
+# 表现为「首页能打开但检索全无结果」。此处从 BASE_URL 自动派生，避免再次漏配。
+def _build_allowed_origins() -> tuple:
+    """构造来源白名单：本机回环地址 + 站点自身域名（含 http/https 两种 scheme）"""
+    origins = ["http://127.0.0.1", "http://localhost", "https://127.0.0.1", "https://localhost"]
+    base = (seo.get_base_url() or "").strip()
+    if base:
+        origins.append(base)
+        # 同时放行 http 版本，nginx 未强制跳转 https 时仍可用
+        if base.startswith("https://"):
+            origins.append("http://" + base[len("https://"):])
+    return tuple(origins)
+
+
+ALLOWED_ORIGIN_PREFIXES = _build_allowed_origins()
+
+
+def _origin_in_allowlist(origin: str) -> bool:
+    """
+    精确判断 Origin 是否在白名单内。
+
+    不能用 startswith 做前缀匹配：那样 https://char.jdkba.com.evil.com
+    会因前缀匹配而被误判为合法，等于给跨域绕过留了口子。
+
+    解析为 (scheme, host, port) 三元组后比对，并按同 scheme 默认端口归一化：
+    浏览器发送的 Origin 常带显式端口（如本地开发 http://127.0.0.1:8080），
+    不做归一化会把最常见的本地开发场景误判为跨域。
+    """
+    if not origin:
+        return True  # 无 Origin（curl、同源直连、导航请求）视为可信
+
+    origin = origin.strip().rstrip("/")
+    if origin in ALLOWED_ORIGIN_PREFIXES:
+        return True
+
+    parsed = _parse_origin(origin)
+    if parsed is None:
+        return False
+    o_scheme, o_host, o_port = parsed
+
+    # 回环地址放行任意端口：本地开发时服务端口由 --port 指定（8080/9000 等皆可），
+    # 不按固定端口比对会把正常的本地调试请求误判为跨域。
+    if o_host in ("127.0.0.1", "localhost", "::1"):
+        return True
+
+    for allowed in ALLOWED_ORIGIN_PREFIXES:
+        a = _parse_origin(allowed)
+        if a is None:
+            continue
+        a_scheme, a_host, a_port = a
+        if o_host != a_host:
+            continue
+        # 端口归一：未显式给出时按 scheme 默认端口处理
+        port = o_port if o_port is not None else (443 if o_scheme == "https" else 80)
+        allow_port = a_port if a_port is not None else (443 if a_scheme == "https" else 80)
+        if port == allow_port:
+            return True
+    return False
+
+
+def _parse_origin(origin: str) -> Optional[Tuple[str, str, Optional[int]]]:
+    """把 Origin 拆成 (scheme, host, port)；格式非法返回 None"""
+    if "://" not in origin:
+        return None
+    scheme, rest = origin.split("://", 1)
+    scheme = scheme.lower()
+    if not rest or "/" in rest or "@" in rest or " " in rest:
+        return None
+    if ":" in rest:
+        host, _, port_str = rest.rpartition(":")
+        try:
+            port = int(port_str)
+        except ValueError:
+            return None
+        if not (0 < port < 65536):
+            return None
+    else:
+        host, port = rest, None
+    if not host:
+        return None
+    return scheme, host.lower(), port
 
 # 分页页码上限：page 无界时 OFFSET 可达 5e10，触发大偏移全表扫描（实测 608ms）
 MAX_PAGE = 10_000
@@ -154,7 +240,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return None
-        if any(origin.startswith(p) for p in ALLOWED_ORIGIN_PREFIXES):
+        if _origin_in_allowlist(origin):
             return origin
         return None
 
@@ -163,7 +249,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return True
-        return any(origin.startswith(p) for p in ALLOWED_ORIGIN_PREFIXES)
+        return _origin_in_allowlist(origin)
 
     def _send_cors_headers(self) -> None:
         """按校验结果下发 CORS 头；不可信来源不下发任何 CORS 头"""
@@ -275,6 +361,11 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
     def _handle_get(self):
         parsed = urllib.parse.urlparse(self.path)
 
+        # 0. 社交分享预览图：由服务端动态生成，优先于静态资源路由处理
+        if parsed.path == seo.OG_IMAGE:
+            self._serve_og_cover()
+            return
+
         # 1. 静态资源托管路由 (/static/css/..., /static/js/...)
         if parsed.path.startswith("/static/"):
             rel_path = parsed.path[len("/static/"):].lstrip("/")
@@ -378,24 +469,98 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
 
 
 
-        # 11. 汉字乐高独立页面
+        # 10. 搜索引擎爬虫识别
+        elif parsed.path == "/robots.txt":
+            body = build_robots().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        # 11. 站点地图（未配置域名时返回 404，避免输出无效的相对路径 sitemap）
+        elif parsed.path == "/sitemap.xml":
+            xml_text = build_sitemap(self._build_sitemap_entries())
+            if not xml_text:
+                self.send_response(404)
+                self.end_headers()
+            else:
+                body = xml_text.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/xml; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self.end_headers()
+                self.wfile.write(body)
+
+        # 13. SEO 字表落地页：服务端渲染真实汉字，供爬虫收录
+        elif parsed.path in ("/chars", "/chars.html"):
+            self._serve_chars_page()
+
+        # 14. 汉字乐高独立页面
         elif parsed.path in ("/lego", "/lego.html"):
-            lego_path = os.path.join(TEMPLATES_DIR, "lego.html")
-            self._serve_file(lego_path, content_type="text/html", cache_seconds=0)
+            self._serve_seo_page("lego", "lego.html", "/lego")
 
-        # 12. 根页面与默认检索模板页面
+        # 15. 根页面与默认检索模板页面
         elif parsed.path in ("/", "/index.html"):
-            index_path = os.path.join(TEMPLATES_DIR, "index.html")
-            self._serve_file(index_path, content_type="text/html", cache_seconds=0)
+            self._serve_seo_page("home", "index.html", "/")
 
-        # 13. API 路由未命中时返回标准 JSON 404，防止前端收到 HTML 页面
+        # 16. API 路由未命中时返回标准 JSON 404，防止前端收到 HTML 页面
         elif parsed.path.startswith("/api/"):
             self._send_json(404, {"error": f"API 接口不存在: {parsed.path}"})
 
-        # 14. 其它未知页面回退到主页
+        # 17. 其它未知页面回退到主页
         else:
-            index_path = os.path.join(TEMPLATES_DIR, "index.html")
-            self._serve_file(index_path, content_type="text/html", cache_seconds=0)
+            self._serve_seo_page("home", "index.html", "/")
+
+    def _ua(self) -> str:
+        """当前请求的 User-Agent"""
+        return self.headers.get("User-Agent", "")
+
+    def _send_html(self, rendered, cache_seconds: int = 0):
+        """把 (html_text, status, content_type) 三元组写回客户端"""
+        if rendered is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        text, status, content_type = rendered
+        body = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if cache_seconds > 0:
+            self.send_header("Cache-Control", f"public, max-age={cache_seconds}")
+        else:
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_seo_page(self, page_key: str, template_name: str, canonical_path: str):
+        """渲染带 SEO 元标签的静态页面（/ 与 /lego）"""
+        self._send_html(
+            seo_pages.render_seo_page(page_key, template_name, canonical_path, self._ua())
+        )
+
+    def _serve_chars_page(self):
+        """SEO 字表落地页：服务端渲染真实汉字，供爬虫收录"""
+        parsed_q = urllib.parse.urlparse(self.path)
+        self._send_html(
+            seo_pages.render_chars_page(engine, parsed_q.query, self._ua()),
+            cache_seconds=1800,
+        )
+
+    def _serve_og_cover(self):
+        """社交分享预览图"""
+        body = seo_pages.render_og_cover().encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _build_sitemap_entries(self) -> list:
+        return seo_pages.build_sitemap_entries(engine)
 
     def do_POST(self):
         if not self._origin_allowed():

@@ -33,17 +33,23 @@ if hasattr(sys.stdout, "reconfigure"):
 from server.handlers import HanziSearchHandler
 
 
-def run_server(port: int = 8088):
+def run_server(port: int = 8088, host: str = "127.0.0.1"):
     """
     启动多线程 HTTP 服务
     每连接分配独立线程，避免阻塞浏览器多路并发请求
+
+    host 默认仅本机可访问；部署到公网时传 "0.0.0.0" 监听全部网卡。
     """
-    server = ThreadingHTTPServer(("127.0.0.1", port), HanziSearchHandler)
+    server = ThreadingHTTPServer((host, port), HanziSearchHandler)
     server.daemon_threads = True
 
     print("============================================================")
     print("🏮 HanziSearcher Web 服务 (模块化高性能版) 已启动！")
-    print(f"👉 访问地址: http://127.0.0.1:{port}")
+    if host == "127.0.0.1":
+        print(f"👉 访问地址: http://127.0.0.1:{port}")
+        print("   (仅本机可访问；如需公网访问请用 --host 0.0.0.0 启动)")
+    else:
+        print(f"👉 监听地址: http://{host}:{port}  (所有网卡，请自行确认防火墙与公网暴露风险)")
     print("📁 前端静态托管: static/ | 页面模板: templates/ | 引擎: searcher/")
     print("按 Ctrl+C 可停止服务")
     print("============================================================")
@@ -58,5 +64,28 @@ def run_server(port: int = 8088):
 
 
 if __name__ == "__main__":
-    port_arg = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8088
-    run_server(port_arg)
+    # 用 argparse 而非手工解析 argv：支持 --port / --host，
+    # 且 --help 自带说明，避免部署时靠猜参数。
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="HanziSearcher 汉字拆字与部件检索服务",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python web_server.py                # 默认 127.0.0.1:8088（仅本机）
+  python web_server.py 9000           # 指定端口
+  python web_server.py 9000 --host 0.0.0.0    # 监听所有网卡（公网部署用）
+        """,
+    )
+    parser.add_argument("port", nargs="?", type=int, default=8088,
+                        help="监听端口，默认 8088")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="监听地址，默认 127.0.0.1（仅本机）；公网部署用 0.0.0.0")
+    args = parser.parse_args()
+
+    if not (1 <= args.port <= 65535):
+        print(f"端口必须在 1~65535 之间，收到: {args.port}", file=sys.stderr)
+        sys.exit(1)
+
+    run_server(args.port, args.host)

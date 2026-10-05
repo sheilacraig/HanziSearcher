@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>汉字字表 - 按笔画与部首浏览全量汉字 | HanziSearcher</title>
+  <!--SEO_META:chars-->
+  <link rel="stylesheet" href="/static/css/style.css?v=2.2">
+  <style>
+    /* 字表页专用样式：与主站视觉一致，但布局为多列字表网格 */
+    .chart-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+    .chart-head { margin: 18px 0 8px; }
+    .chart-head h1 {
+      font-size: 26px; font-weight: 700; color: var(--primary);
+      margin: 0 0 6px; letter-spacing: .5px;
+    }
+    .chart-sub { color: #6d635b; font-size: 13px; line-height: 1.75; margin: 0; }
+    .chart-sub b { color: var(--primary); }
+
+    .stroke-nav { display: flex; flex-wrap: wrap; gap: 5px; margin: 14px 0 20px; }
+    .stroke-nav a {
+      display: inline-block; min-width: 34px; padding: 4px 7px; text-align: center;
+      font-size: 12px; text-decoration: none; color: #5a5248;
+      background: #fff; border: 1px solid #ded5c7; border-radius: 6px;
+      transition: all .12s;
+    }
+    .stroke-nav a:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .stroke-nav a.active { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 700; }
+    .stroke-nav .nav-all { min-width: auto; padding: 4px 12px; }
+
+    .char-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+      gap: 8px; margin: 18px 0 26px;
+    }
+    .char-card {
+      background: #fff; border: 1px solid #e8e0d2; border-radius: 10px;
+      padding: 9px 6px 8px; text-align: center; text-decoration: none;
+      display: block; transition: all .12s;
+    }
+    .char-card:hover { border-color: var(--primary); box-shadow: 0 3px 10px rgba(139,90,43,.13); transform: translateY(-1px); }
+    .char-glyph { font-size: 30px; line-height: 1.18; color: #2c2622; font-family: "Kaiti SC", "STKaiti", serif; }
+    .char-py { font-size: 11px; color: #b08968; margin-top: 3px; height: 14px; overflow: hidden; }
+    .char-meta { font-size: 10px; color: #9c9186; margin-top: 1px; }
+    .char-ids {
+      font-size: 9px; color: #a89e91; margin-top: 2px; height: 12px; overflow: hidden;
+      white-space: nowrap; text-overflow: ellipsis;
+    }
+
+    .chart-foot { text-align: center; color: #8c7b70; font-size: 12px; margin-top: 30px; line-height: 2; }
+    .chart-foot a { color: var(--primary); text-decoration: none; }
+    .chart-foot a:hover { text-decoration: underline; }
+    .pager { display: flex; justify-content: center; align-items: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
+    .pager a, .pager span {
+      padding: 5px 12px; border: 1px solid #ded5c7; border-radius: 6px;
+      background: #fff; color: #5a5248; text-decoration: none; font-size: 13px;
+    }
+    .pager a:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .pager .cur { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 700; }
+    .pager .dis { opacity: .4; }
+  </style>
+</head>
+<body>
+<div class="container chart-wrap">
+
+  <header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+    <div class="brand-title" style="display:flex;align-items:center;gap:12px;">
+      <div class="brand-seal">字</div>
+      <div>
+        <h1 style="font-size:20px;font-weight:700;color:var(--primary);margin:0;">汉字字表</h1>
+        <span class="subtitle-badge">按笔画浏览 · 全量离线字库</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <a href="/" class="header-nav-btn" style="text-decoration:none;" title="返回汉字拆字与部件检索"><span>🔍 拆字检索</span></a>
+      <a href="/lego" class="header-nav-btn" style="text-decoration:none;" title="前往汉字乐高工作台"><span>🧱 汉字乐高</span></a>
+    </div>
+  </header>
+
+  <div class="chart-head">
+    <h1>全量汉字字表 · 共 {{TOTAL}} 字</h1>
+    <p class="chart-sub">
+      收录 CJK 统一表意文字基础区（U+4E00~U+9FFF）<b>{{SIMPLE}}</b> 字，
+      以及扩展区 A~H 罕见字 <b>{{EXTENDED}}</b> 字，合计 <b>{{TOTAL}}</b> 字。
+      每字均标注拼音、笔画数、部首、IDS 结构描述与 Unicode 码位，<b>全部离线可用</b>。
+    </p>
+  </div>
+
+  <!-- 笔画导航：既是筛选器，也是爬虫可抓的内部链接（权重传递的关键） -->
+  <nav class="stroke-nav" aria-label="按笔画数筛选">
+    <a href="/chars" class="nav-all {{ALL_ACTIVE}}">全部笔画</a>
+    {{STROKE_NAV}}
+  </nav>
+
+  <main class="char-grid">
+    {{CHAR_CARDS}}
+  </main>
+
+  <nav class="pager" aria-label="分页导航">
+    {{PAGER}}
+  </nav>
+
+  <div class="chart-foot">
+    数据来源：<a href="https://www.unicode.org/charts/unihan.html" rel="nofollow noopener" target="_blank">Unicode Unihan Database</a> ·
+    <a href="https://github.com/cjkvi/cjkvi-ids" rel="nofollow noopener" target="_blank">CJKVI-IDS</a> ·
+    <a href="https://glyphwiki.org/" rel="nofollow noopener" target="_blank">GlyphWiki</a><br>
+    每个汉字可通过
+    <a href="/?q={{SAMPLE_CHAR}}">拆字检索</a> ·
+    <a href="/lego?char={{SAMPLE_CHAR}}">汉字乐高拼装</a> 继续探索 ·
+    <a href="/chars?page=2">下一页</a>
+  </div>
+
+</div>
+</body>
+</html>

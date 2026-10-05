@@ -182,6 +182,10 @@ QUAD_REPEAT_MAP = {
     "牛": "𤛭", "鱼": "𩙡", "龙": "𪚥", "口": "㗊", "又": "叕"
 }
 
+# 字库笔画数区间：CJK 实际用字集中在 1~64画，用于 SEO 字表页的规模统计与筛选
+MIN_STROKES = 1
+MAX_STROKES = 64
+
 
 
 class HanziEngine:
@@ -852,6 +856,100 @@ class HanziEngine:
             except Exception:
                 return ""
         return val
+
+    def get_alphabet_stats(self) -> Dict[str, Any]:
+        """
+        统计字库规模，用于 SEO 字表页的分页规划与首页数据展示。
+        只读聚合查询，结果极轻量。
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) FROM characters")
+        total = cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT count(*) FROM characters WHERE total_strokes BETWEEN ? AND ?",
+            (MIN_STROKES, MAX_STROKES),
+        )
+        simple = cursor.fetchone()[0]
+        return {"total": total, "simple": simple, "extended": total - simple}
+
+    def get_stroke_distribution(self) -> List[Tuple[int, int]]:
+        """
+        各笔画数（1~64）的汉字数量分布，供字表页生成可读的规模说明。
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT total_strokes, count(*) FROM characters
+               WHERE total_strokes BETWEEN ? AND ?
+               GROUP BY total_strokes ORDER BY total_strokes ASC""",
+            (MIN_STROKES, MAX_STROKES),
+        )
+        return [(row[0], row[1]) for row in cursor.fetchall()]
+
+    def get_chars_for_seo(
+        self,
+        page: int = 1,
+        page_size: int = 60,
+        stroke: Optional[int] = None,
+        radical: Optional[int] = None
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        字表落地页数据源：按笔画 / 部首分页返回汉字基础信息。
+
+        与用户检索接口的刻意区别：
+        - 不返回 svg_data —— 避免响应体膨胀，爬虫也不需要矢量图
+        - 只取 SEO 需要的少数字段，减少 JSON 体积
+        注意：这里的「页」是给爬虫看的落地页，必须只输出真正的汉字。
+        字库中混有 α ℓ ① ① 等非汉字条目（total_strokes 为 NULL），
+        它们对 SEO 没有价值且属于垃圾内容，故强制过滤掉。
+        """
+        conditions = ["c.total_strokes IS NOT NULL"]
+        params: List[Any] = []
+        if stroke is not None:
+            conditions.append("c.total_strokes = ?")
+            params.append(stroke)
+        if radical is not None:
+            conditions.append("c.radical = ?")
+            params.append(radical)
+        where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT count(*) FROM characters c {where_sql}", params)
+        total = cursor.fetchone()[0]
+
+        offset = max(0, (page - 1) * page_size)
+        # 排序策略：笔画 -> 分区 -> 码位。
+        # 分区排序不可省略：扩展 A 区(U+3400~U+4DBF)码位低于基础区(U+4E00 起)，
+        # 只按码位排会让生僻字霸占首屏（3 画页曾是清一色「㐃㐄㐇」），
+        # 而用户查字表期望先看到常用字。
+        cursor.execute(f"""
+            SELECT c.code_point, c.hex_code, c.character, c.pinyin,
+                   c.total_strokes, c.radical, c.ids_direct, c.block_name
+            FROM characters c
+            {where_sql}
+            ORDER BY c.total_strokes ASC,
+                     CASE WHEN c.code_point BETWEEN 0x4E00 AND 0x9FFF THEN 0
+                          WHEN c.code_point BETWEEN 0x3400 AND 0x4DBF THEN 1
+                          ELSE 2 END ASC,
+                     c.code_point ASC
+            LIMIT ? OFFSET ?
+        """, params + [page_size, offset])
+        rows = cursor.fetchall()
+        results = [
+            {
+                "character": r[2],
+                "hex_code": r[1],
+                "pinyin": r[3] or "",
+                "strokes": r[4],
+                "radical": r[5],
+                "ids": r[6] or "",
+                "block": r[7] or "",
+            }
+            for r in rows
+        ]
+        return total, results
 
     def get_component_svg(self, char_or_comp: str) -> Optional[str]:
         """
