@@ -518,7 +518,10 @@
         totalCount = data.total_count || 0;
 
         let modeDesc = `模式: [${data.mode}]`;
-        if (q && strokes) {
+        if (data.mode === 'joint_components' || data.mode === 'joint_components_and_strokes') {
+          const compStr = (data.components || []).join(' + ');
+          modeDesc = strokes ? `合字检索: [${compStr}] + [${strokes} 画]` : `合字检索: [${compStr}]`;
+        } else if (q && strokes) {
           modeDesc = `组合检索: [${q}] + [${strokes} 画]`;
         } else if (strokes) {
           modeDesc = `总笔画单独检索: [${strokes} 画]`;

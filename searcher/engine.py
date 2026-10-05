@@ -46,6 +46,84 @@ def _token_match(comp: str) -> Tuple[str, str]:
     return sql, param
 
 
+def _is_chinese_char(c: str) -> bool:
+    """
+    判定单个字符是否属于 CJK 统一表意文字及部首扩展区间
+    """
+    if not c or len(c) != 1:
+        return False
+    cp = ord(c)
+    return (
+        (0x4E00 <= cp <= 0x9FFF) or      # CJK Unified Ideographs 基础区
+        (0x3400 <= cp <= 0x4DBF) or      # Extension A
+        (0x20000 <= cp <= 0x2A6DF) or    # Extension B
+        (0x2A700 <= cp <= 0x2B73F) or    # Extension C
+        (0x2B740 <= cp <= 0x2B81F) or    # Extension D
+        (0x2B820 <= cp <= 0x2CEAF) or    # Extension E
+        (0x2CEB0 <= cp <= 0x2EBEF) or    # Extension F
+        (0x30000 <= cp <= 0x3134F) or    # Extension G
+        (0x31350 <= cp <= 0x323AF) or    # Extension H
+        (0x2E80 <= cp <= 0x2EF3) or      # CJK 部首补充
+        (0x2F00 <= cp <= 0x2FD5)         # 康熙部首
+    )
+
+
+# 常见部首与正字等价映射表（用于合字检索时无缝联想）
+COMPONENT_VARIANTS = {
+    '人': ['人', '亻'],
+    '亻': ['亻', '人'],
+    '水': ['水', '氵', '氺'],
+    '氵': ['氵', '水', '氺'],
+    '手': ['手', '扌'],
+    '扌': ['扌', '手'],
+    '心': ['心', '忄'],
+    '忄': ['忄', '心'],
+    '火': ['火', '灬'],
+    '灬': ['灬', '火'],
+    '犬': ['犬', '犭'],
+    '犭': ['犭', '犬'],
+    '示': ['示', '礻'],
+    '礻': ['礻', '示'],
+    '衣': ['衣', '衤'],
+    '衤': ['衤', '衣'],
+    '金': ['金', '钅'],
+    '钅': ['钅', '金'],
+    '言': ['言', '讠'],
+    '讠': ['讠', '言'],
+    '食': ['食', '饣'],
+    '饣': ['饣', '食'],
+    '糸': ['糸', '纟'],
+    '纟': ['纟', '糸'],
+    '草': ['艹', '艸'],
+    '艹': ['艹', '草', '艸'],
+    '竹': ['竹', '⺮'],
+    '⺮': ['⺮', '竹'],
+    '月': ['月', '⺼'],
+    '⺼': ['⺼', '月'],
+}
+
+# 常见二叠、三叠、四叠字快速索引映射（当输入连续相同汉字时直出置顶）
+DOUBLE_REPEAT_MAP = {
+    "木": "林", "火": "炎", "日": "昍", "月": "朋", "人": "从",
+    "牛": "牪", "石": "砳", "口": "吕", "又": "双", "戈": "戋",
+    "土": "圭", "子": "孖", "白": "皕", "鱼": "䲆"
+}
+
+TRIPLE_REPEAT_MAP = {
+    "木": "森", "火": "焱", "日": "晶", "牛": "犇", "羊": "羴",
+    "石": "磊", "水": "淼", "土": "垚", "金": "鑫", "人": "众",
+    "口": "品", "目": "瞐", "车": "轰", "手": "掱", "毛": "毳",
+    "直": "矗", "马": "骉", "龙": "龘", "雷": "靐", "风": "飍",
+    "犬": "猋", "鹿": "麤", "鱼": "鱻", "子": "孱", "耳": "聶"
+}
+
+QUAD_REPEAT_MAP = {
+    "火": "燚", "木": "𣛧", "日": "𣊭", "水": "𣾜", "土": "𡑯",
+    "牛": "𤛭", "鱼": "𩙡", "龙": "𪚥", "口": "㗊", "又": "叕"
+}
+
+
+
 class HanziEngine:
     """汉字多模态检索引擎 (全功能增强版)"""
 
@@ -216,6 +294,125 @@ class HanziEngine:
             LIMIT ? OFFSET ?
         """
         cursor.execute(query_sql, params + [page_size, offset])
+        results = [self._format_row(r) for r in cursor.fetchall()]
+        return total_count, results
+
+    def search_by_joint_components(
+        self,
+        components: List[str],
+        raw_query: str,
+        strokes: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 50
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        连写免空格合字检索（拼字直搜）
+        输入 "入水" -> 优先置顶精确合字 "汆" (⿱入水)，次优反向组合 "𣱸" (⿱水入)，再列出包含这些部件的派生字
+        输入 "车俞" -> 优先置顶 "输" (⿰车俞)
+        输入 "木寸" -> 优先置顶 "村" (⿰木寸)
+        输入 "木木木" -> 优先置顶 "森"
+        输入 "火火火火" -> 优先置顶 "燚"
+        """
+        clean_comps = [c.strip() for c in components if c.strip() and c.strip() not in IDC_CHARS]
+        if not clean_comps:
+            return 0, []
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 1. 检查是否为同字连续叠字（如 "木木木" -> 森, "火火火火" -> 燚, "牛牛牛" -> 犇）
+        repeat_target_char = None
+        if len(clean_comps) >= 2 and len(set(clean_comps)) == 1:
+            base_char = clean_comps[0]
+            cnt = len(clean_comps)
+            if cnt == 2:
+                repeat_target_char = DOUBLE_REPEAT_MAP.get(base_char)
+            elif cnt == 3:
+                repeat_target_char = TRIPLE_REPEAT_MAP.get(base_char)
+            elif cnt >= 4:
+                repeat_target_char = QUAD_REPEAT_MAP.get(base_char)
+
+        # 2. 构建 WHERE 条件（若同字重复只查单个字符，并支持常见部首等价扩展，如 人/亻，水/氵）
+        conditions = []
+        where_params = []
+        comps_to_check = list(set(clean_comps)) if len(set(clean_comps)) == 1 else clean_comps
+
+        for comp in comps_to_check:
+            vars_list = COMPONENT_VARIANTS.get(comp, [comp])
+            sub_conds = []
+            for v in vars_list:
+                sub_sql, sub_param = _token_match(v)
+                sub_conds.append(sub_sql)
+                where_params.append(sub_param)
+            conditions.append("(" + " OR ".join(sub_conds) + ")")
+
+        where_sql = " AND ".join(conditions)
+
+        # 若命中了特定叠字（如“燚”），将其直接并入候选集，防止其因 IDS 递归层级差异被漏查
+        if repeat_target_char:
+            where_sql = f"({where_sql}) OR c.character = ?"
+            where_params.append(repeat_target_char)
+
+        if strokes is not None:
+            where_sql = f"({where_sql}) AND c.total_strokes = ?"
+            where_params.append(strokes)
+
+        # 统计匹配总数
+        count_sql = f"SELECT count(*) FROM characters c WHERE {where_sql}"
+        cursor.execute(count_sql, where_params)
+        total_count = cursor.fetchone()[0]
+
+        if total_count == 0:
+            return 0, []
+
+        # 3. 智能权重构建（直构置顶 + 顺向优先 + 纯合字优先）
+        rank_cases = []
+        rank_params = []
+
+        # (a) 叠字目标字符绝对置顶（Rank 0）
+        if repeat_target_char:
+            rank_cases.append("WHEN c.character = ? THEN 0")
+            rank_params.append(repeat_target_char)
+
+        # (b) 顺向直接合字（Rank 1）与 逆向直接合字（Rank 2）
+        if len(clean_comps) >= 2 and len(set(clean_comps)) > 1:
+            p1, p2 = clean_comps[0], clean_comps[1]
+            v1_list = COMPONENT_VARIANTS.get(p1, [p1])
+            v2_list = COMPONENT_VARIANTS.get(p2, [p2])
+
+            sub_forward = []
+            for v1 in v1_list:
+                for v2 in v2_list:
+                    sub_forward.append("c.ids_direct LIKE ?")
+                    rank_params.append(f"%{_escape_like(v1)}%{_escape_like(v2)}%")
+            if sub_forward:
+                rank_cases.append(f"WHEN {' OR '.join(sub_forward)} THEN 1")
+
+            sub_backward = []
+            for v2 in v2_list:
+                for v1 in v1_list:
+                    sub_backward.append("c.ids_direct LIKE ?")
+                    rank_params.append(f"%{_escape_like(v2)}%{_escape_like(v1)}%")
+            if sub_backward:
+                rank_cases.append(f"WHEN {' OR '.join(sub_backward)} THEN 2")
+
+        if rank_cases:
+            case_sql = f"(CASE {' '.join(rank_cases)} ELSE 3 END)"
+            order_clause = f"ORDER BY {case_sql} ASC, LENGTH(c.ids_tokens) ASC, c.total_strokes ASC, c.code_point ASC"
+        else:
+            order_clause = "ORDER BY LENGTH(c.ids_tokens) ASC, c.total_strokes ASC, c.code_point ASC"
+
+        offset = max(0, (page - 1) * page_size)
+        query_sql = f"""
+            SELECT {self._select_fields()}
+            FROM characters c
+            LEFT JOIN character_variants v ON c.code_point = v.code_point
+            LEFT JOIN character_svgs s ON c.code_point = s.code_point
+            WHERE {where_sql}
+            {order_clause}
+            LIMIT ? OFFSET ?
+        """
+        cursor.execute(query_sql, where_params + rank_params + [page_size, offset])
         results = [self._format_row(r) for r in cursor.fetchall()]
         return total_count, results
 
@@ -551,6 +748,30 @@ class HanziEngine:
                 "total_pages": math.ceil(total / page_size) if total > 0 else 0,
                 "results": results
             }
+
+        # 7.5 连写免空格合字检索 (如 "入水" -> 汆, "车俞" -> 输, "木寸" -> 村, "木木木" -> 森, "火火火火" -> 燚)
+        if 2 <= len(q) <= 6 and all(_is_chinese_char(c) for c in q):
+            clean_parts = list(q)
+            total, results = self.search_by_joint_components(
+                clean_parts,
+                raw_query=q,
+                strokes=strokes,
+                page=page,
+                page_size=page_size
+            )
+            if total > 0:
+                mode_name = "joint_components_and_strokes" if strokes is not None else "joint_components"
+                return {
+                    "mode": mode_name,
+                    "query": q,
+                    "components": clean_parts,
+                    "strokes": strokes,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total,
+                    "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+                    "results": results
+                }
 
         # 8. 单部件检索 (或包含笔画过滤的部件检索)
         total, results = self.search_by_components([q], strokes=strokes, page=page, page_size=page_size)
