@@ -5,7 +5,6 @@
 import json
 import os
 from typing import Optional, Dict, Any
-from searcher.font_parser import parse_font_file
 
 CUSTOM_FONT_PATH = "data/custom_font.ttf"
 CUSTOM_FONT_META_PATH = "data/custom_font_meta.json"

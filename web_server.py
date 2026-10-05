@@ -12,8 +12,23 @@ import os
 import sys
 from http.server import ThreadingHTTPServer
 
+# 项目根目录：DB / 模板 / 静态资源全部以它为基准做相对定位
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # 确保项目根目录在 Python 模块搜索路径中
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+
+# 锚定工作目录到项目根。
+# DB_PATH("data/hanzi.db")、STATIC_DIR、TEMPLATES_DIR 均为相对路径，
+# 若从其它目录启动，sqlite 会抛 "unable to open database file"，整个服务不可用。
+os.chdir(BASE_DIR)
+
+# Windows 控制台下避免 GBK 编码引发 emoji 输出崩溃
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from server.handlers import HanziSearchHandler
 
@@ -37,6 +52,9 @@ def run_server(port: int = 8088):
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n服务已平稳停止。")
+    finally:
+        # 显式关闭套接字，确保快速重启时端口可立即重新绑定
+        server.server_close()
 
 
 if __name__ == "__main__":

@@ -3,11 +3,11 @@
 支持：码位直查、多部件无序交集、IDS 模式匹配、结构别名、简繁异体字流变、汉字血缘衍生树
 """
 
-import math
 import re
 import sqlite3
 import threading
 import zlib
+from functools import lru_cache
 from typing import List, Dict, Any, Optional, Tuple
 
 IDC_CHARS = set("⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿㇯")
@@ -35,6 +35,59 @@ def _escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _like_pattern(raw: str) -> str:
+    """
+    将用户原始输入转换为「已转义 + 已映射本项目通配语法」的 LIKE 模式串。
+
+    处理顺序不可颠倒：
+    1. 先转义用户输入里天然存在的 LIKE 元字符（\\ % _），否则它们会被当成通配符放大匹配范围
+    2. 再把本项目语法 ? -> _（单构件）、* -> %（任意长度）映射为 LIKE 通配符
+
+    调用方必须在 SQL 中配套 `ESCAPE '\\'` 子句，否则转义失效。
+    """
+    return _escape_like(raw).replace("?", "_").replace("*", "%")
+
+
+def _normalize_code_point(raw: str) -> Optional[int]:
+    """
+    【唯一码位归一化入口】把用户输入解析为 Unicode 码位整数。
+
+    全工程（search_by_code / get_svg_from_db / get_component_svg）必须共用本函数，
+    否则同一输入会在不同接口解析为不同字符。
+
+    识别规则（按优先级）：
+      - 空串 / 空白           -> None
+      - 单个非数字字符        -> ord(c)          例: 木 -> U+6728
+      - U+XXXX / U XXXX / u+ -> 十六进制          例: U+8F93
+      - 0xXXXX               -> 十六进制          例: 0x8F93
+      - 4~6 位且含字母的十六进制 -> 十六进制       例: 690D -> 木（排除纯数字，避免劫持）
+      - 纯数字                -> 十进制           例: 1234 -> U+04D2
+      - 其余                  -> None
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+
+    # 单字符：数字留给十进制分支，避免 "5" 被解析为 U+0005
+    if len(s) == 1 and not s.isdigit():
+        return ord(s)
+
+    # 显式前缀形式：U+XXXX / U XXXX / 0xXXXX
+    m = re.fullmatch(r"(?:[Uu][\+\s]?|0[xX])([0-9A-Fa-f]{1,6})", s)
+    if m:
+        return int(m.group(1), 16)
+
+    # 纯数字一律十进制
+    if s.isdigit():
+        return int(s)
+
+    # 4~6 位十六进制（必须含字母，纯数字已被上一分支拦截）
+    if len(s) in (4, 5, 6) and re.fullmatch(r"[0-9A-Fa-f]{4,6}", s):
+        return int(s, 16)
+
+    return None
+
+
 def _token_match(comp: str) -> Tuple[str, str]:
     """
     生成对 ids_tokens（逗号分隔部件列表）的整词匹配 (SQL 片段, 参数)。
@@ -44,6 +97,13 @@ def _token_match(comp: str) -> Tuple[str, str]:
     sql = "(',' || REPLACE(c.ids_tokens, ' ', '') || ',') LIKE ? ESCAPE '\\'"
     param = f"%,{_escape_like(comp)},%"
     return sql, param
+
+
+def _total_pages(total: int, page_size: int) -> int:
+    """整数运算求总页数，避免 math.ceil(total / page_size) 的浮点除法"""
+    if total <= 0 or page_size <= 0:
+        return 0
+    return -(-total // page_size)
 
 
 def _is_chinese_char(c: str) -> bool:
@@ -171,29 +231,7 @@ class HanziEngine:
         """
         按 Unicode 码位或单字符精确查找 (关联变体谱系与 SVG 矢量数据)
         """
-        code_str = code_str.strip()
-        code_point = None
-
-        if len(code_str) == 1 and not code_str.isdigit():
-            code_point = ord(code_str)
-        elif code_str.upper().startswith("U+") or code_str.lower().startswith("0x"):
-            hex_part = code_str[2:]
-            try:
-                code_point = int(hex_part, 16)
-            except ValueError:
-                return None
-        elif (len(code_str) in (4, 5, 6)
-              and re.fullmatch(r"[0-9A-Fa-f]{4,6}", code_str) is not None
-              and not code_str.isdigit()):
-            # 仅 4~6 位且含十六进制字母的才视为裸码位（如 690D）；
-            # 纯数字(如 2024)不再误判为 0x2024，落到下方十进制分支
-            try:
-                code_point = int(code_str, 16)
-            except ValueError:
-                return None
-        elif code_str.isdigit():
-            code_point = int(code_str)
-
+        code_point = _normalize_code_point(code_str)
         if code_point is None:
             return None
 
@@ -300,7 +338,6 @@ class HanziEngine:
     def search_by_joint_components(
         self,
         components: List[str],
-        raw_query: str,
         strokes: Optional[int] = None,
         page: int = 1,
         page_size: int = 50
@@ -383,7 +420,7 @@ class HanziEngine:
             sub_forward = []
             for v1 in v1_list:
                 for v2 in v2_list:
-                    sub_forward.append("c.ids_direct LIKE ?")
+                    sub_forward.append("c.ids_direct LIKE ? ESCAPE '\\'")
                     rank_params.append(f"%{_escape_like(v1)}%{_escape_like(v2)}%")
             if sub_forward:
                 rank_cases.append(f"WHEN {' OR '.join(sub_forward)} THEN 1")
@@ -391,7 +428,7 @@ class HanziEngine:
             sub_backward = []
             for v2 in v2_list:
                 for v1 in v1_list:
-                    sub_backward.append("c.ids_direct LIKE ?")
+                    sub_backward.append("c.ids_direct LIKE ? ESCAPE '\\'")
                     rank_params.append(f"%{_escape_like(v2)}%{_escape_like(v1)}%")
             if sub_backward:
                 rank_cases.append(f"WHEN {' OR '.join(sub_backward)} THEN 2")
@@ -430,9 +467,10 @@ class HanziEngine:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        sql_like = clean_pat.replace("?", "_").replace("*", "%")
+        # 统一走 _like_pattern：先转义用户输入里的 LIKE 元字符，再映射 ? / * 语法
+        sql_like = _like_pattern(clean_pat)
 
-        conditions = ["c.ids_direct LIKE ?"]
+        conditions = ["c.ids_direct LIKE ? ESCAPE '\\'"]
         params = [sql_like]
 
         if strokes is not None:
@@ -494,12 +532,12 @@ class HanziEngine:
             params.append(max_strokes)
 
         if block_name:
-            conditions.append("c.block_name LIKE ?")
-            params.append(f"%{block_name}%")
+            conditions.append("c.block_name LIKE ? ESCAPE '\\'")
+            params.append(f"%{_escape_like(block_name)}%")
 
         if pinyin:
-            conditions.append("c.pinyin LIKE ?")
-            params.append(f"%{pinyin.strip()}%")
+            conditions.append("c.pinyin LIKE ? ESCAPE '\\'")
+            params.append(f"%{_escape_like(pinyin.strip())}%")
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -629,7 +667,7 @@ class HanziEngine:
                     "page": page,
                     "page_size": page_size,
                     "total_count": total,
-                    "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+                    "total_pages": _total_pages(total, page_size),
                     "results": results
                 }
             return {
@@ -708,7 +746,7 @@ class HanziEngine:
                 "page": page,
                 "page_size": page_size,
                 "total_count": total,
-                "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+                "total_pages": _total_pages(total, page_size),
                 "results": results
             }
 
@@ -724,7 +762,7 @@ class HanziEngine:
                 "page": page,
                 "page_size": page_size,
                 "total_count": total,
-                "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+                "total_pages": _total_pages(total, page_size),
                 "results": results
             }
 
@@ -745,7 +783,7 @@ class HanziEngine:
                 "page": page,
                 "page_size": page_size,
                 "total_count": total,
-                "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+                "total_pages": _total_pages(total, page_size),
                 "results": results
             }
 
@@ -754,7 +792,6 @@ class HanziEngine:
             clean_parts = list(q)
             total, results = self.search_by_joint_components(
                 clean_parts,
-                raw_query=q,
                 strokes=strokes,
                 page=page,
                 page_size=page_size
@@ -769,7 +806,7 @@ class HanziEngine:
                     "page": page,
                     "page_size": page_size,
                     "total_count": total,
-                    "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+                    "total_pages": _total_pages(total, page_size),
                     "results": results
                 }
 
@@ -783,9 +820,38 @@ class HanziEngine:
             "page": page,
             "page_size": page_size,
             "total_count": total,
-            "total_pages": math.ceil(total / page_size) if total > 0 else 0,
+            "total_pages": _total_pages(total, page_size),
             "results": results
         }
+
+    def get_svg_by_code_param(self, code_param: str) -> str:
+        """
+        按码位/单字符参数取 SVG 矢量字符串（供 /api/svg 使用）。
+
+        码位解析统一走 _normalize_code_point，确保与 search_by_code 结果一致
+        （历史上 handlers 自带一套解析，导致 q=1234 与 code=1234 返回不同字符）。
+        """
+        cp = _normalize_code_point(code_param)
+        if cp is None:
+            return ""
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT svg_data FROM character_svgs WHERE hex_code = ? OR code_point = ?",
+            (f"U+{cp:04X}", cp),
+        )
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return ""
+
+        val = row[0]
+        if isinstance(val, bytes):
+            try:
+                return zlib.decompress(val).decode("utf-8")
+            except Exception:
+                return ""
+        return val
 
     def get_component_svg(self, char_or_comp: str) -> Optional[str]:
         """
@@ -876,13 +942,21 @@ class HanziEngine:
             except Exception:
                 pass
 
-        # 解析部件列表
-        tokens = [t.strip() for t in (ids_tokens or "").split(",") if t.strip()]
+        # 解析部件列表：与 clean_direct 同策略，只保留单字汉字 / 部首，过滤 IDS 噪声标记
+        tokens = [
+            t.strip() for t in (ids_tokens or "").split(",")
+            if t.strip() and (len(t.strip()) == 1 and (_is_chinese_char(t.strip()) or t.strip().isdigit()))
+        ]
 
         clean_direct = []
         if ids_direct:
             for ch in ids_direct:
-                if ch not in IDC_CHARS and not ch.isspace() and ch not in "[]GTKVJZ":
+                # 白名单策略：只保留真正的汉字 / CJK 部首，其余一律丢弃。
+                # 库里除 IDC 操作符外还混有大量非汉字标记（A H X α ℓ ①②③ △ い よ り コ 等），
+                # 它们不是可拼装部件，若原样透出会被前端当作积木渲染成噪声方块。
+                if ch in IDC_CHARS or ch.isspace():
+                    continue
+                if _is_chinese_char(ch) or ch.isdigit():
                     if ch not in clean_direct:
                         clean_direct.append(ch)
 
@@ -917,9 +991,13 @@ class HanziEngine:
             "components": components
         }
 
+    @lru_cache(maxsize=1)
     def get_preset_radicals(self) -> Dict[str, List[Dict[str, Any]]]:
         """
         获取预置分类优质汉字部件/部首积木库，供汉字乐高直接取用。
+
+        结果常驻缓存：预设库是静态数据，每次请求重复跑约 70 次 SQL + 70 次 zlib 解压属无谓开销。
+        数据库为只读且进程生命周期内不变，缓存不会过期。
         """
         presets = {
             "自然天地": ["日", "月", "水", "氵", "火", "灬", "木", "土", "金", "钅", "石", "山", "雨", "风", "田", "气"],

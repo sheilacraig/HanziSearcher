@@ -159,7 +159,7 @@ kill $(lsof -t -i :8088)
 
 ```text
 .
-├── web_server.py         # HTTP 服务轻量化启动入口 (44 行纯启动脚本)
+├── web_server.py         # HTTP 服务轻量化启动入口 (纯启动脚本，锚定工作目录到项目根)
 ├── server/               # 服务端核心业务逻辑
 │   ├── handlers.py       # HTTP 请求路由分发、API 处理器与静态资源托管
 │   └── font_manager.py   # 自定义字体持久化管理与元数据读写

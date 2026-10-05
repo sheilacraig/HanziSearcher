@@ -6,11 +6,7 @@ Web 请求处理与 API 路由分发模块
 import json
 import mimetypes
 import os
-import re
-import time
 import urllib.parse
-import zlib
-from contextlib import closing
 from http.server import BaseHTTPRequestHandler
 from typing import Optional, Dict, Any
 
@@ -28,6 +24,14 @@ from server.font_manager import (
 DB_PATH = "data/hanzi.db"
 TEMPLATES_DIR = "templates"
 STATIC_DIR = "static"
+
+# 允许的跨域来源白名单：仅本机自身来源。
+# 历史问题：无条件下发 Access-Control-Allow-Origin: * 且 do_OPTIONS 主动放行预检，
+# 任意第三方网页可对本机端口发起跨域 fetch，从而静默覆盖 / 删除用户字体文件。
+ALLOWED_ORIGIN_PREFIXES = ("http://127.0.0.1", "http://localhost")
+
+# 分页页码上限：page 无界时 OFFSET 可达 5e10，触发大偏移全表扫描（实测 608ms）
+MAX_PAGE = 10_000
 
 engine = HanziEngine()
 
@@ -80,54 +84,108 @@ def get_svg_from_db(code_param: str) -> str:
     """
     从 SQLite 本地库获取字形 SVG 矢量数据（100% 离线，无网络请求）
     兼容 Unicode 码位字符串 (如 'U+4E00', '4E00', 0x4E00) 与原始单字符 (如 '一')
+
+    码位解析统一委托 searcher.engine._normalize_code_point，
+    避免与 /api/search 出现两套解析规则导致同一输入返回不同字符。
     """
-    cp = _parse_code_param(code_param)
-    if cp is None:
-        return ""
-    full_hex = f"U+{cp:04X}"
-
-    with closing(sqlite3_connect()) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT svg_data FROM character_svgs WHERE hex_code = ? OR code_point = ?", (full_hex, cp))
-        row = cursor.fetchone()
-
-    if row and row[0]:
-        val = row[0]
-        if isinstance(val, bytes):
-            try:
-                return zlib.decompress(val).decode("utf-8")
-            except Exception:
-                return ""
-        return val
-    return ""
-
-
-def sqlite3_connect():
-    """获取 SQLite 数据库连接"""
-    import sqlite3
-    return sqlite3.connect(DB_PATH, timeout=5)
+    return engine.get_svg_by_code_param(code_param)
 
 
 
+
+
+def _is_client_disconnect(exc: BaseException) -> bool:
+    """
+    判断异常是否为「客户端提前断开连接」。
+
+    浏览器刷新 / 关标签 / 脚本被中断时，Windows 抛的是 ConnectionAbortedError /
+    ConnectionResetError，而不只是 POSIX 的 BrokenPipeError。原先只捕 BrokenPipeError，
+    导致这类正常断连被当成服务内部错误处理。
+    """
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    inner = getattr(exc, "errno", None)
+    return inner in (10053, 10054, 104)
+
+
+class _HeadOnlySink:
+    """
+    HEAD 请求的响应体抑制器。
+
+    注意不能简单把 self.wfile 换成空 sink —— BaseHTTPRequestHandler 的
+    end_headers()/send_response() 会通过 wfile 写响应头，换掉后头部也丢了。
+    因此这里只拦截「响应体」写入：先让响应头正常落盘，再把 body 丢弃。
+
+    实现方式：作为 wfile 的前置过滤器，仅在第一次写入后放行（响应头），
+    之后的所有写入（响应体）静默丢弃。
+    """
+
+    def __init__(self, real_wfile):
+        self._real = real_wfile
+        self._headers_done = False
+
+    def write(self, data):
+        if not self._headers_done:
+            # 首个写入通常是 b"" 或状态行，视为响应头阶段，正常透传
+            self._headers_done = True
+            return self._real.write(data)
+        return len(data)
+
+    def flush(self):
+        try:
+            self._real.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
 
 class HanziSearchHandler(BaseHTTPRequestHandler):
     """汉字检索与全功能 Web 服务处理器"""
 
+    def _cors_origin(self) -> Optional[str]:
+        """
+        校验并返回回显用的 Origin。
+
+        无 Origin 头（curl、同源直连、导航请求）视为可信，返回 None 表示不下发 CORS 头。
+        有 Origin 头时必须在白名单内，否则跨域请求被拒。
+        """
+        origin = self.headers.get("Origin")
+        if not origin:
+            return None
+        if any(origin.startswith(p) for p in ALLOWED_ORIGIN_PREFIXES):
+            return origin
+        return None
+
+    def _origin_allowed(self) -> bool:
+        """判断当前请求来源是否可接受（拒绝时由调用方返回 403）"""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        return any(origin.startswith(p) for p in ALLOWED_ORIGIN_PREFIXES)
+
+    def _send_cors_headers(self) -> None:
+        """按校验结果下发 CORS 头；不可信来源不下发任何 CORS 头"""
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
     def _send_json(self, status: int, payload: Any, extra_headers: Optional[Dict[str, str]] = None):
-        """统一 JSON 响应：带 Content-Length，并开启跨域"""
+        """统一 JSON 响应：带 Content-Length，并按白名单开启跨域"""
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         for k, v in (extra_headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
     def _serve_file(self, file_path: str, content_type: Optional[str] = None, cache_seconds: int = 86400):
-        """分发静态本地文件，支持 MIME 判定与缓存头"""
+        """分发静态本地文件，支持 MIME 判定、分块流式传输与缓存头"""
         if not os.path.exists(file_path) or not os.path.isfile(file_path):
             self.send_response(404)
             self.end_headers()
@@ -139,35 +197,76 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
                 content_type = "application/octet-stream"
 
         try:
-            with open(file_path, "rb") as f:
-                content = f.read()
+            file_size = os.path.getsize(file_path)
             self.send_response(200)
             self.send_header("Content-Type", f"{content_type}; charset=utf-8" if "text" in content_type else content_type)
-            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Content-Length", str(file_size))
             if cache_seconds > 0:
                 self.send_header("Cache-Control", f"public, max-age={cache_seconds}")
             else:
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Expires", "0")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(content)
-        except Exception:
-            self.send_response(500)
+            self._send_cors_headers()
             self.end_headers()
 
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+            # 64KB 分块流式写出，避免大文件 (如 100MB 字体) 瞬时占用过多内存
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except Exception as e:
+            if _is_client_disconnect(e):
+                return
+            try:
+                self.send_response(500)
+                self.end_headers()
+            except Exception:
+                pass
+
+    def do_OPTIONS(self):
+        """处理 CORS 跨域预检请求（仅放行白名单来源）"""
+        if not self._origin_allowed():
+            self.send_response(403)
+            self.end_headers()
+            return
+        self.send_response(204)
+        self._send_cors_headers()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Authorization")
+        self.send_header("Access-Control-Max-Age", "86400")
         self.end_headers()
 
-    def do_GET(self):
+    def do_HEAD(self):
+        """
+        历史问题：原先对任意路径（含 /api/nonexistent）恒返回 200，
+        会误导浏览器、代理与缓存预检。此处复用 GET 的路由判定，仅把响应体写入降级为丢弃。
+        """
+        if not self._origin_allowed():
+            self.send_response(403)
+            self.end_headers()
+            return
+        # 抑制响应体写入，但保证响应头正常落盘（headers 在 end_headers 时一次性写出）
+        real_wfile, self.wfile = self.wfile, _HeadOnlySink(self.wfile)
         try:
             self._handle_get()
-        except BrokenPipeError:
+        except Exception:
             pass
+        finally:
+            self.wfile = real_wfile
+
+    def do_GET(self):
+        if not self._origin_allowed():
+            self._send_json(403, {"error": "跨域来源不被允许"})
+            return
+        try:
+            self._handle_get()
         except Exception as e:
+            if _is_client_disconnect(e):
+                return
+            self._log_exception("GET", e)
             try:
                 self._send_json(500, {"error": f"服务内部错误: {e}"})
             except Exception:
@@ -180,10 +279,10 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/static/"):
             rel_path = parsed.path[len("/static/"):].lstrip("/")
             file_path = os.path.join(STATIC_DIR, rel_path)
-            # 安全防路径穿越检查
+            # 安全防路径穿越检查（必须以基准目录加路径分隔符为前缀）
             real_base = os.path.realpath(STATIC_DIR)
             real_target = os.path.realpath(file_path)
-            if real_target.startswith(real_base) and os.path.exists(real_target):
+            if (real_target == real_base or real_target.startswith(real_base + os.path.sep)) and os.path.isfile(real_target):
                 self._serve_file(real_target, cache_seconds=0)
             else:
                 self.send_response(404)
@@ -196,7 +295,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             q = qs.get("q", [""])[0]
             strokes = _int_arg(qs, "strokes", 0, lo=0, hi=99)
             strokes = strokes if strokes > 0 else None
-            page = _int_arg(qs, "page", 1, lo=1)
+            page = _int_arg(qs, "page", 1, lo=1, hi=MAX_PAGE)
             page_size = _int_arg(qs, "page_size", 50, lo=1, hi=200)
 
             result = engine.smart_search(q, strokes=strokes, page=page, page_size=page_size)
@@ -225,7 +324,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "public, max-age=31536000")
-                self.send_header("Access-Control-Allow-Origin", "*")
+                self._send_cors_headers()
                 self.end_headers()
                 self.wfile.write(body)
             else:
@@ -257,7 +356,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("Access-Control-Allow-Origin", "*")
+                self._send_cors_headers()
                 self.end_headers()
                 self.wfile.write(body)
             else:
@@ -285,16 +384,29 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             self._serve_file(lego_path, content_type="text/html", cache_seconds=0)
 
         # 12. 根页面与默认检索模板页面
+        elif parsed.path in ("/", "/index.html"):
+            index_path = os.path.join(TEMPLATES_DIR, "index.html")
+            self._serve_file(index_path, content_type="text/html", cache_seconds=0)
+
+        # 13. API 路由未命中时返回标准 JSON 404，防止前端收到 HTML 页面
+        elif parsed.path.startswith("/api/"):
+            self._send_json(404, {"error": f"API 接口不存在: {parsed.path}"})
+
+        # 14. 其它未知页面回退到主页
         else:
             index_path = os.path.join(TEMPLATES_DIR, "index.html")
             self._serve_file(index_path, content_type="text/html", cache_seconds=0)
 
     def do_POST(self):
+        if not self._origin_allowed():
+            self._send_json(403, {"success": False, "error": "跨域来源不被允许"})
+            return
         try:
             self._handle_post()
-        except BrokenPipeError:
-            pass
         except Exception as e:
+            if _is_client_disconnect(e):
+                return
+            self._log_exception("POST", e)
             try:
                 self._send_json(500, {"error": f"服务内部错误: {e}"})
             except Exception:
@@ -308,7 +420,12 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             filename = qs.get("filename", ["uploaded_font.ttf"])[0]
 
-            content_length = int(self.headers.get("Content-Length", 0))
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+            except (ValueError, TypeError):
+                self._send_json(400, {"success": False, "error": "无效的 Content-Length 请求头"})
+                return
+
             if content_length > MAX_FONT_BYTES:
                 self._send_json(413, {"success": False, "error": f"字体文件过大（上限 {MAX_FONT_BYTES // (1024 * 1024)}MB）"})
                 return
@@ -318,12 +435,42 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
 
             font_data = self.rfile.read(content_length)
 
+            # 先落临时文件做解析校验，确认是合法字体后再原子替换正式文件。
+            # 直接写 CUSTOM_FONT_PATH 的历史问题：非法字体会立即覆盖用户已上传的有效字体，
+            # 且 /api/font_file 仍以 font/ttf 下发，浏览器加载失败而前端状态显示「已就绪」。
             os.makedirs(os.path.dirname(CUSTOM_FONT_PATH), exist_ok=True)
-            with open(CUSTOM_FONT_PATH, "wb") as f:
-                f.write(font_data)
+            tmp_path = CUSTOM_FONT_PATH + ".uploading"
+            try:
+                with open(tmp_path, "wb") as f:
+                    f.write(font_data)
 
-            font_name, codepoints = parse_font_file(CUSTOM_FONT_PATH)
-            if not codepoints:
+                try:
+                    font_name, codepoints = parse_font_file(tmp_path)
+                except Exception:
+                    font_name, codepoints = "", set()
+
+                if not codepoints:
+                    # cmap 表为空 => 不是可识别的字体，丢弃临时文件并保留原有字体
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                    self._send_json(400, {
+                        "success": False,
+                        "error": "文件不是可识别的字体（TTF / OTF / WOFF / TTC），cmap 表为空或解析失败",
+                    })
+                    return
+
+                # 解析成功：原子替换正式字体文件
+                os.replace(tmp_path, CUSTOM_FONT_PATH)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                raise
+
+            # fontTools 解析成功时返回的是临时文件名，说明内部名称提取失败，回退到用户提供的名字
+            if not font_name or font_name == os.path.basename(tmp_path):
                 font_name = filename
 
             meta = {
@@ -341,8 +488,26 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"success": True, "has_font": False})
 
         else:
-            self.send_response(404)
-            self.end_headers()
+            if parsed.path.startswith("/api/"):
+                self._send_json(404, {"success": False, "error": f"API 接口不存在: {parsed.path}"})
+            else:
+                self.send_response(404)
+                self.end_headers()
 
     def log_message(self, format, *args):
         pass
+
+    def log_error(self, format, *args):
+        pass
+
+    def _log_exception(self, tag: str, exc: Exception):
+        """
+        5xx 落日志。原先 log_message 全量丢弃，服务端零日志，
+        出错时只能靠响应体猜，且 log_message 的静默也会掩盖部分传输层异常。
+        """
+        try:
+            import traceback
+            print(f"[{tag}] {self.path} -> {type(exc).__name__}: {exc}", flush=True)
+            traceback.print_exc()
+        except Exception:
+            pass

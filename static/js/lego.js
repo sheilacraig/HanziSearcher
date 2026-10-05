@@ -391,20 +391,6 @@
       return effective;
     }
 
-    // 打开与关闭汉字乐高模态框
-    function openLegoModal() {
-      const modal = document.getElementById('legoModal');
-      if (modal) modal.style.display = 'flex';
-      initLegoStudio();
-    }
-
-    function closeLegoModal() {
-      const modal = document.getElementById('legoModal');
-      if (modal) modal.style.display = 'none';
-      const drawer = document.getElementById('legoVaultDrawer');
-      if (drawer) drawer.classList.remove('open');
-    }
-
     // 初始化汉字乐高
     function initLegoStudio() {
       if (Object.keys(legoSlotsData).length === 0) {
@@ -1153,7 +1139,7 @@
       const ids = document.getElementById('legoIds').value;
       const liushu = document.getElementById('legoLiushu').value;
       const meaning = (document.getElementById('legoMeaning').value || '').trim() || '此字聚万物之气韵，承天意而幻化，妙手偶得之。';
-      const author = (document.getElementById('legoAuthor').value || '').trim() || 'wanghonghui 敬造';
+      const author = (document.getElementById('legoAuthor').value || '').trim() || '造字人 敬造';
 
       document.getElementById('cardPinyin').innerText = pinyin;
       document.getElementById('cardIds').innerText = ids;
@@ -1429,7 +1415,7 @@
       document.getElementById('legoPinyin').value = item.pinyin || '';
       document.getElementById('legoLiushu').value = item.liushu || '会意字';
       document.getElementById('legoMeaning').value = item.meaning || '';
-      document.getElementById('legoAuthor').value = item.author || 'wanghonghui 敬造';
+      document.getElementById('legoAuthor').value = item.author || '造字人 敬造';
 
       document.querySelectorAll('#legoTemplatesBar .lego-tpl-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.layout === currentLegoLayout);
@@ -1477,6 +1463,22 @@
         }, 150);
       }
     }
+
+    // ESC 关闭档案卡弹窗或造字库抽屉
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const cardModal = document.getElementById('legoCardModal');
+        if (cardModal && cardModal.style.display === 'flex') {
+          closeCardModal();
+          return;
+        }
+        const drawer = document.getElementById('legoVaultDrawer');
+        if (drawer && drawer.classList.contains('open')) {
+          toggleLegoVault();
+          return;
+        }
+      }
+    });
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initLegoApp);

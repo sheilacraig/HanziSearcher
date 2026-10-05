@@ -938,12 +938,8 @@
     // ESC 关闭任意已打开的模态弹窗
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      const legoCardModal = document.getElementById('legoCardModal');
-      if (legoCardModal && legoCardModal.style.display === 'flex') { closeCardModal(); return; }
-      const legoModal = document.getElementById('legoModal');
-      if (legoModal && legoModal.style.display === 'flex') { closeLegoModal(); return; }
-      if (familyModal.style.display === 'flex') { closeFamilyModal(); return; }
-      if (settingsModal.style.display === 'flex') { closeSettingsModal(); return; }
+      if (familyModal && familyModal.style.display === 'flex') { closeFamilyModal(); return; }
+      if (settingsModal && settingsModal.style.display === 'flex') { closeSettingsModal(); return; }
     });
 
     // 汉字检索主站初始化运行
