@@ -33,6 +33,15 @@ if hasattr(sys.stdout, "reconfigure"):
 from server.handlers import HanziSearchHandler
 
 
+class HanziHTTPServer(ThreadingHTTPServer):
+    """
+    ThreadingHTTPServer 的 listen backlog 默认仅 5，
+    公网 / nginx 突发并发下会直接丢弃入站连接，提到 64。
+    """
+    daemon_threads = True
+    request_queue_size = 64
+
+
 def run_server(port: int = 8088, host: str = "127.0.0.1"):
     """
     启动多线程 HTTP 服务
@@ -40,8 +49,7 @@ def run_server(port: int = 8088, host: str = "127.0.0.1"):
 
     host 默认仅本机可访问；部署到公网时传 "0.0.0.0" 监听全部网卡。
     """
-    server = ThreadingHTTPServer((host, port), HanziSearchHandler)
-    server.daemon_threads = True
+    server = HanziHTTPServer((host, port), HanziSearchHandler)
 
     print("============================================================")
     print("🏮 HanziSearcher Web 服务 (模块化高性能版) 已启动！")

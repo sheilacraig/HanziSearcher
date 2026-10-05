@@ -478,9 +478,45 @@
       }
     }
 
+    // 检索状态 <-> URL 同步：所有检索请求都有可收藏 / 可分享 / 可收录的静态 URL
+    // （/?q=*&strokes=8&page=2 形态；/chars 内链与 schema.org SearchAction 依赖此行为）
+    function syncUrlToState(push) {
+      const params = [];
+      const q = searchInput.value.trim();
+      const s = strokesInput.value.trim();
+      if (q) params.push('q=' + encodeURIComponent(q));
+      if (s) params.push('strokes=' + encodeURIComponent(s));
+      if (currentPage > 1) params.push('page=' + currentPage);
+      const url = params.length ? '/?' + params.join('&') : '/';
+      try {
+        if (push) history.pushState({ hanzisearch: true }, '', url);
+        else history.replaceState({ hanzisearch: true }, '', url);
+      } catch (e) { /* file:// 等极端环境下静默降级 */ }
+    }
+
+    // 从 URL 恢复检索状态（深链直达 / 浏览器后退键），返回页码
+    function applyUrlToInputs() {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q');
+      const s = params.get('strokes');
+      const p = parseInt(params.get('page'), 10);
+      // 默认检索框用通配符 *（全库 IDS 模式匹配），总笔画数默认为空
+      searchInput.value = (q === null || q === '') ? '*' : q;
+      strokesInput.value = (s === null || s === '') ? '' : s;
+      updateClearIcons();
+      savedCursorStart = savedCursorEnd = searchInput.value.length;
+      return (isNaN(p) || p < 1) ? 1 : p;
+    }
+
+    window.addEventListener('popstate', () => {
+      const page = applyUrlToInputs();
+      currentPage = page;
+      doSearch(page, { fromPop: true });
+    });
+
     // 综合检索函数 (支持 单独检索框、单独总笔画数、组合检索)
     let searchSeq = 0;   // 请求序号守卫：过期响应直接丢弃，防止慢响应覆盖新结果
-    async function doSearch(page = 1) {
+    async function doSearch(page = 1, opts = {}) {
       const q = searchInput.value.trim();
       const strokesRaw = strokesInput.value.trim();
 
@@ -493,12 +529,14 @@
       }
       const strokes = strokesRaw;
 
-      // 两者皆空时清空视图
+      // 两者皆空时清空视图（URL 同步退回首页态，避免地址栏残留旧查询）
       if (!q && !strokes) {
         resultsGrid.innerHTML = '';
         paginationBar.style.display = 'none';
         statusText.innerText = '输入内容或指定总笔画数以开始检索（支持 9 万+ Unicode CJK 统一表意文字）';
         countText.innerText = '';
+        currentPage = 1;
+        if (!opts.fromPop) syncUrlToState(false);
         return;
       }
 
@@ -534,6 +572,9 @@
 
         renderCards(currentResults);
         renderPagination();
+
+        // 检索成功后把状态写进 URL（fromPop 场景 URL 已是最新，无需重复写入）
+        if (!opts.fromPop) syncUrlToState(!!opts.push);
       } catch (err) {
         if (seq === searchSeq) statusText.innerText = '检索出错：' + err.message;
       }
@@ -709,7 +750,8 @@
 
     function changePage(newPage) {
       if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
-      doSearch(newPage);
+      // 翻页写入浏览器历史，支持后退键逐页回退
+      doSearch(newPage, { push: true });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -738,7 +780,8 @@
     });
 
     resetBtn.addEventListener('click', () => {
-      searchInput.value = '';
+      // 重置恢复默认检索态：通配符 * + 总笔画数为空（与首次打开一致）
+      searchInput.value = '*';
       strokesInput.value = '';
       updateClearIcons();
       currentPage = 1;
@@ -768,12 +811,12 @@
       const hasGlyph = customFontActive && customFontGlyphs.has(cp);
       const sourceBadgeHtml = buildSourceBadge(char);
 
-      modalTitle.innerHTML = `【 ${char} 】 ${sourceBadgeHtml}`;
+      modalTitle.innerHTML = `【 ${esc(char)} 】 ${sourceBadgeHtml}`;
       modalMeta.innerText = `Unicode: ${hex} | 正在调取家族图谱...`;
-      
+
       // 大字纯净展示：优先字体，降级先用加载动画
       if (hasGlyph) {
-        modalGlyph.innerHTML = `<span class="glyph-text-font" style="font-size:68px; line-height:98px;">${char}</span>`;
+        modalGlyph.innerHTML = `<span class="glyph-text-font" style="font-size:68px; line-height:98px;">${esc(char)}</span>`;
       } else {
         modalGlyph.innerHTML = `<span style="font-size:13px; color:#999;">加载中...</span>`;
       }
@@ -946,10 +989,9 @@
     if (typeof initToolbox === 'function') initToolbox();
     if (typeof initFontSystem === 'function') initFontSystem();
 
-    // 默认检索演示 "回"
+    // 初始检索：优先从 URL 深链恢复（/?q=字 / ?q=*&strokes=8&page=2 等，SEO 内链依赖），
+    // 无参数时使用默认通配检索（q=*，总笔画数为空）
     if (typeof searchInput !== 'undefined' && searchInput) {
-      searchInput.value = "回";
-      updateClearIcons();
-      savedCursorStart = savedCursorEnd = searchInput.value.length;
-      doSearch(1);
+      const initialPage = applyUrlToInputs();
+      doSearch(initialPage);
     }

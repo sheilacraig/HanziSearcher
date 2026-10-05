@@ -6,7 +6,6 @@ Web 请求处理与 API 路由分发模块
 import json
 import mimetypes
 import os
-import re
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from typing import Optional, Dict, Any, Tuple
@@ -149,23 +148,6 @@ def _int_arg(qs: Dict[str, list], key: str, default: int, lo: Optional[int] = No
     return val
 
 
-def _parse_code_param(code_param: str) -> Optional[int]:
-    """
-    严格解析码位参数：单字符 / U+XXXX / U XXXX / 0xXXXX / 1~6 位纯十六进制。
-    """
-    s = (code_param or "").strip()
-    if not s:
-        return None
-    if len(s) == 1:
-        return ord(s)
-    m = re.fullmatch(r"(?:[Uu][\+\s]?|0[xX])([0-9A-Fa-f]{1,6})", s)
-    if m:
-        return int(m.group(1), 16)
-    if re.fullmatch(r"[0-9A-Fa-f]{1,6}", s):
-        return int(s, 16)
-    return None
-
-
 def get_svg_from_db(code_param: str) -> str:
     """
     从 SQLite 本地库获取字形 SVG 矢量数据（100% 离线，无网络请求）
@@ -282,6 +264,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             if not content_type:
                 content_type = "application/octet-stream"
 
+        body_started = False
         try:
             file_size = os.path.getsize(file_path)
             self.send_response(200)
@@ -295,6 +278,7 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
                 self.send_header("Expires", "0")
             self._send_cors_headers()
             self.end_headers()
+            body_started = True
 
             # 64KB 分块流式写出，避免大文件 (如 100MB 字体) 瞬时占用过多内存
             with open(file_path, "rb") as f:
@@ -306,11 +290,17 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         except Exception as e:
             if _is_client_disconnect(e):
                 return
-            try:
-                self.send_response(500)
-                self.end_headers()
-            except Exception:
-                pass
+            if not body_started:
+                # 响应头尚未发出：仍可安全返回 500
+                try:
+                    self.send_response(500)
+                    self.end_headers()
+                except Exception:
+                    pass
+            else:
+                # 响应头已发出：不能再补状态行（会污染响应流、产生错乱的 HTTP 报文），
+                # 唯一正确的做法是直接断开连接，让客户端以截断错误感知失败
+                self.close_connection = True
 
     def do_OPTIONS(self):
         """处理 CORS 跨域预检请求（仅放行白名单来源）"""
@@ -338,8 +328,10 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         real_wfile, self.wfile = self.wfile, _HeadOnlySink(self.wfile)
         try:
             self._handle_get()
-        except Exception:
-            pass
+        except Exception as e:
+            # 响应头可能已写出无法回填状态码，但异常本身必须落日志，不能静默吞掉
+            if not _is_client_disconnect(e):
+                self._log_exception("HEAD", e)
         finally:
             self.wfile = real_wfile
 
@@ -509,9 +501,16 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         elif parsed.path.startswith("/api/"):
             self._send_json(404, {"error": f"API 接口不存在: {parsed.path}"})
 
-        # 17. 其它未知页面回退到主页
+        # 17. 其它未知路径返回 404。
+        # 历史问题：原先回退渲染首页（200 软 404），搜索引擎会收录大量
+        # 「任意垃圾 URL 都返回首页」的重复页面，稀释站点权重。
         else:
-            self._serve_seo_page("home", "index.html", "/")
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            body = "404 Not Found"
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
 
     def _ua(self) -> str:
         """当前请求的 User-Agent"""
@@ -658,6 +657,18 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             else:
                 self.send_response(404)
                 self.end_headers()
+
+    def finish(self):
+        """
+        请求收尾钩子：把本请求线程占用的 SQLite 连接归还引擎连接池复用。
+        ThreadingHTTPServer 每请求一线程且不复用线程，若不归还，
+        连接只能等线程对象 GC 时被动关闭，低配 VPS 上持续 FD / 内存 churn。
+        """
+        try:
+            engine.recycle_connection()
+        except Exception:
+            pass
+        super().finish()
 
     def log_message(self, format, *args):
         pass

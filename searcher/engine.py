@@ -106,6 +106,31 @@ def _total_pages(total: int, page_size: int) -> int:
     return -(-total // page_size)
 
 
+# 拼音声调变体表：库中 pinyin 字段按「单字母带调」格式存储（如 wáng），
+# 用户输入的是无调 ASCII 拼音（如 wang），直接 LIKE 永远匹配不上。
+# 拼音声调只标在单个元音上，把输入按元音位置展开为各声调变体即可全覆盖。
+TONAL_VOWELS = {
+    'a': 'āáǎà',
+    'e': 'ēéěè',
+    'i': 'īíǐì',
+    'o': 'ōóǒò',
+    'u': 'ūúǔù',
+    'v': 'ǖǘǚǜ',   # 用户以 v 代 ü 的输入习惯
+    'ü': 'ǖǘǚǜ',
+}
+
+
+def _pinyin_variants(q: str) -> List[str]:
+    """把无调拼音展开为「原串 + 各元音位置的单声调标注变体」列表"""
+    out = [q]
+    for i, ch in enumerate(q):
+        tones = TONAL_VOWELS.get(ch)
+        if tones:
+            for tone in tones:
+                out.append(q[:i] + tone + q[i + 1:])
+    return out
+
+
 def _is_chinese_char(c: str) -> bool:
     """
     判定单个字符是否属于 CJK 统一表意文字及部首扩展区间
@@ -191,23 +216,55 @@ MAX_STROKES = 64
 class HanziEngine:
     """汉字多模态检索引擎 (全功能增强版)"""
 
-    def __init__(self, db_path: str = "data/hanzi.db"):
+    def __init__(self, db_path: str = "data/hanzi.db", pool_size: int = 8):
         self.db_path = db_path
         self._local = threading.local()
+        # 空闲连接池：ThreadingHTTPServer 每请求一线程且不复用线程，
+        # 纯 thread-local 会导致每个请求都新建 SQLite 连接、靠 GC 兜底关闭，
+        # 在低配 VPS 上持续 FD / 内存 churn。此处改为「请求结束显式归还池中复用」。
+        self._pool: List[sqlite3.Connection] = []
+        self._pool_lock = threading.Lock()
+        self._pool_size = pool_size
 
     def get_connection(self) -> sqlite3.Connection:
         """
         线程局部连接：配合 ThreadingHTTPServer 每个请求线程独享连接，
         避免多线程共享同一 Connection 造成的游标错乱与递归使用异常。
         引擎只做只读查询，统一开启 query_only 从根本上杜绝写竞争。
+        优先从空闲池复用（请求结束时由 HanziSearchHandler.finish 归还），
+        池空才真正新建连接。
         """
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA query_only = 1")
+            with self._pool_lock:
+                conn = self._pool.pop() if self._pool else None
+            if conn is None:
+                # check_same_thread=False：连接在请求结束时归还池中、由下一个请求线程
+                # 独占复用（借出期间无任何共享），池 + 锁保证同一时刻单线程持有，
+                # 解除 sqlite 的线程绑定检查以支持跨请求线程复用。
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA query_only = 1")
             self._local.conn = conn
         return conn
+
+    def recycle_connection(self) -> None:
+        """
+        请求结束时回收本线程连接：同一线程内独占使用，归还动作无共享竞争。
+        池满则直接关闭，防止长连接泄漏堆积。调用方须保证请求内 SQL 已全部执行完毕。
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        self._local.conn = None
+        with self._pool_lock:
+            if len(self._pool) < self._pool_size:
+                self._pool.append(conn)
+                return
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     def _select_fields(self) -> str:
         return """
@@ -462,10 +519,14 @@ class HanziEngine:
         pattern: str,
         strokes: Optional[int] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
+        hanzi_only: bool = False
     ) -> Tuple[int, List[Dict[str, Any]]]:
         """
         IDS 模式通配符匹配（支持总笔画数过滤、分页、变体谱系与 SVG 矢量数据）
+
+        hanzi_only: 附加「有笔画数」过滤，剔除 α ℓ ① 等非汉字占位条目。
+        仅用于纯通配查询（* / ?），带具体结构的模式本身不会命中这些条目。
         """
         clean_pat = pattern.strip()
         conn = self.get_connection()
@@ -476,6 +537,10 @@ class HanziEngine:
 
         conditions = ["c.ids_direct LIKE ? ESCAPE '\\'"]
         params = [sql_like]
+
+        # 与 SEO 字表页同一判据：total_strokes 为 NULL 的即非汉字占位条目
+        if hanzi_only:
+            conditions.append("c.total_strokes IS NOT NULL")
 
         if strokes is not None:
             conditions.append("c.total_strokes = ?")
@@ -540,8 +605,12 @@ class HanziEngine:
             params.append(f"%{_escape_like(block_name)}%")
 
         if pinyin:
-            conditions.append("c.pinyin LIKE ? ESCAPE '\\'")
-            params.append(f"%{_escape_like(pinyin.strip())}%")
+            # 库内 pinyin 带声调存储（wáng），用户输入无调拼音（wang）：
+            # 展开声调变体逐个 LIKE 匹配，否则拼音检索永远返回 0 结果
+            variants = _pinyin_variants(pinyin.strip())
+            pinyin_conds = [f"c.pinyin LIKE ? ESCAPE '\\'" for _ in variants]
+            conditions.append("(" + " OR ".join(pinyin_conds) + ")")
+            params.extend(f"%{_escape_like(v)}%" for v in variants)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -684,12 +753,13 @@ class HanziEngine:
             }
 
         # 2. 检查是否为显式码位字符串 (如 U+690D, 0x690D 或 4-6 位含字母十六进制)
+        #    纯字母的裸十六进制（如 face -> U+FACE）不在此时劫持：
+        #    它与拼音输入形状冲突（拼音检索优先），待拼音无结果后再回退码位。
+        looks_bare_hex = bool(len(q) in (4, 5, 6) and re.fullmatch(r"[0-9A-Fa-f]{4,6}", q))
         is_explicit_code = (
             q.upper().startswith("U+") or
             q.lower().startswith("0x") or
-            (len(q) in (4, 5, 6)
-             and bool(re.fullmatch(r"[0-9A-Fa-f]{4,6}", q))
-             and not q.isdigit())   # 纯数字不劫持，避免吞掉普通数字输入
+            (looks_bare_hex and not q.isalpha())   # 混合数字字母（如 690D）不可能是拼音，直接按码位
         )
 
         if is_explicit_code:
@@ -741,7 +811,12 @@ class HanziEngine:
         has_idc = any(c in IDC_CHARS for c in normalized_q)
         if has_idc or ("*" in normalized_q or "?" in normalized_q):
             clean_idc_query = "".join(normalized_q.split())
-            total, results = self.search_by_ids_pattern(clean_idc_query, strokes=strokes, page=page, page_size=page_size)
+            # 纯通配查询（* / ?，不含任何具体部件）会命中 α ℓ ① 等非汉字占位条目，
+            # 默认首页检索就是这种场景，必须过滤，否则首屏全是垃圾字符
+            only_wildcards = bool(clean_idc_query) and not any(ch not in "*?" for ch in clean_idc_query)
+            total, results = self.search_by_ids_pattern(
+                clean_idc_query, strokes=strokes, page=page, page_size=page_size,
+                hanzi_only=only_wildcards)
             mode_name = "ids_pattern_and_strokes" if strokes is not None else "ids_pattern"
             return {
                 "mode": mode_name,
@@ -779,6 +854,21 @@ class HanziEngine:
                 page=page,
                 page_size=page_size
             )
+            # 拼音无结果且输入恰为 4~6 位纯字母十六进制（如 face）时，
+            # 回退为码位直查（U+FACE），避免裸 hex 抢先劫持吞掉拼音检索
+            if total == 0 and looks_bare_hex:
+                exact = self.search_by_code(q)
+                if exact and (strokes is None or exact.get("total_strokes") == strokes):
+                    return {
+                        "mode": "exact_code",
+                        "query": q,
+                        "strokes": strokes,
+                        "page": 1,
+                        "page_size": page_size,
+                        "total_count": 1,
+                        "total_pages": 1,
+                        "results": [exact]
+                    }
             mode_name = "pinyin_and_strokes" if strokes is not None else "pinyin"
             return {
                 "mode": mode_name,
@@ -997,6 +1087,36 @@ class HanziEngine:
                 pass
         return None
 
+    def _get_component_svgs_batch(self, chars: List[str]) -> Dict[int, str]:
+        """
+        批量获取部件 SVG：一条 IN 查询替代逐部件最多两条查询（N+1 修复）。
+        返回 {码位: svg字符串}；未命中或解压失败的码位不出现在结果里，
+        由调用方决定是否走 get_component_svg 的变体回退逻辑。
+        """
+        cps = sorted({ord(c[0]) for c in chars if c})
+        if not cps:
+            return {}
+
+        out: Dict[int, str] = {}
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        # IN 参数分块，避免超长 SQL（SQLite 变量上限默认 999）
+        for i in range(0, len(cps), 200):
+            chunk = cps[i:i + 200]
+            placeholders = ",".join("?" * len(chunk))
+            cursor.execute(
+                f"SELECT code_point, svg_data FROM character_svgs WHERE code_point IN ({placeholders})",
+                chunk,
+            )
+            for cp, blob in cursor.fetchall():
+                if not blob:
+                    continue
+                try:
+                    out[cp] = zlib.decompress(blob).decode("utf-8") if isinstance(blob, bytes) else blob
+                except Exception:
+                    pass
+        return out
+
     def disassemble_char(self, char: str) -> Dict[str, Any]:
         """
         拆解输入字符为乐高部件积木。
@@ -1069,13 +1189,18 @@ class HanziEngine:
         if target not in all_comp_chars:
             all_comp_chars.append(target)
 
-        # 批量获取部件 SVG 矢量
+        # 批量获取部件 SVG 矢量（一条 IN 查询，替代原先每部件最多 2 条的 N+1）
+        svg_map = self._get_component_svgs_batch(all_comp_chars)
         components = []
         for comp_char in all_comp_chars:
-            comp_svg = self.get_component_svg(comp_char)
+            comp_cp = ord(comp_char[0])
+            comp_svg = svg_map.get(comp_cp)
+            if comp_svg is None:
+                # 主表未命中（部首变体等罕见情况）才走带回退的单查
+                comp_svg = self.get_component_svg(comp_char)
             components.append({
                 "char": comp_char,
-                "hex_code": f"U+{ord(comp_char[0]):04X}",
+                "hex_code": f"U+{comp_cp:04X}",
                 "svg_data": comp_svg
             })
 
