@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>汉字乐高 - HanziSearcher</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=2.2" />
+  <link rel="stylesheet" href="/static/css/lego.css?v=2.2" />
+</head>
+<body class="lego-standalone-body">
+
+  <!-- 顶部主导航栏（与主站风格统一并互相跳转链接） -->
+  <header class="header lego-page-header">
+    <div class="brand-title" style="display:flex; align-items:center; gap:12px;">
+      <div class="brand-seal">造</div>
+      <div style="">
+        <h1 style="font-size: 20px; font-weight:700; color:var(--primary); margin:0; display:flex; align-items:center; gap:8px; white-space:nowrap;">
+          <span>汉字乐高</span>
+        </h1>
+        <span class="subtitle-badge">拼装部首骨架 · 创造专属汉字与天书 · 矢量 SVG 直出</span>
+      </div>
+    </div>
+
+    <!-- 顶部操作按钮 -->
+    <div class="header-actions">
+      <!-- 互相引用跳转：返回汉字检索 -->
+      <a href="/" class="header-nav-btn" style="text-decoration:none;" title="前往汉字拆字与部件多维检索">
+        <span>🔍 汉字检索</span>
+      </a>
+      <button class="lego-tool-btn" id="legoVaultBtn" onclick="toggleLegoVault()">
+        <span>📚 我的造字库 (<span id="vaultCount">0</span>)</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 汉字乐高独立工作台容器 -->
+  <main class="lego-standalone-main">
+    <div class="lego-standalone-workspace">
+      <!-- 工坊主体三栏布局 -->
+      <div class="lego-body">
+        <!-- 左栏：积木部件栏 -->
+        <div class="lego-sidebar-left">
+          <!-- 1. 拆字取件机 -->
+          <div class="lego-panel-section">
+            <div class="lego-section-title">
+              <span>🔍 汉字拆解机</span>
+              <span class="lego-hint">拆任意字取部件</span>
+            </div>
+            <div class="lego-disassemble-box">
+              <input type="text" id="legoCharInput" class="lego-input" placeholder="输入汉字如: 赢, 森, 休" maxlength="10" onkeydown="if(event.key==='Enter') disassembleInputChar()" />
+              <button class="lego-btn-primary" onclick="disassembleInputChar()">拆解</button>
+            </div>
+            <!-- 拆解出来的部件积木 -->
+            <div class="lego-disassemble-results" id="legoDisassembleResults">
+              <span class="lego-empty-tip">输入汉字并拆解，提取零件</span>
+            </div>
+          </div>
+
+          <!-- 2. 分类常用部首积木 -->
+          <div class="lego-panel-section lego-radicals-section">
+            <div class="lego-section-title">
+              <span>🧱 常用部首积木</span>
+              <span class="lego-hint">点击放入当前插槽</span>
+            </div>
+            <!-- 分类 Tabs -->
+            <div class="lego-category-tabs" id="legoCategoryTabs">
+              <button class="lego-tab active" data-cat="自然天地" onclick="switchRadicalCategory('自然天地', this)">自然</button>
+              <button class="lego-tab" data-cat="人体生灵" onclick="switchRadicalCategory('人体生灵', this)">生灵</button>
+              <button class="lego-tab" data-cat="建筑器物" onclick="switchRadicalCategory('建筑器物', this)">器物</button>
+              <button class="lego-tab" data-cat="形意框架" onclick="switchRadicalCategory('形意框架', this)">形意</button>
+            </div>
+            <!-- 积木网格 -->
+            <div class="lego-bricks-grid" id="legoBricksGrid">
+              <!-- 动态加载积木 -->
+            </div>
+          </div>
+
+          <!-- 3. 自定义单字作部件 -->
+          <div class="lego-panel-section">
+            <div class="lego-section-title">
+              <span>🔤 自定义部件</span>
+              <span class="lego-hint">直接输单字</span>
+            </div>
+            <div class="lego-disassemble-box">
+              <input type="text" id="legoCustomCompInput" class="lego-input" placeholder="输入任意字作为零件" maxlength="1" onkeydown="if(event.key==='Enter') addCustomComponent()" />
+              <button class="lego-btn-secondary" onclick="addCustomComponent()">填入</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中栏：拼装主舞台与画布 -->
+        <div class="lego-main-stage">
+          <!-- 结构骨架模板选择器 -->
+          <div class="lego-templates-bar" id="legoTemplatesBar">
+            <div class="lego-templates-label">一级骨架:</div>
+            <div class="lego-templates-list">
+              <button class="lego-tpl-btn active" data-layout="left-right" onclick="switchLegoLayout('left-right', this)" title="左右结构 (如: 明, 林, 休)">
+                <span class="tpl-icon">⿰</span>
+                <span class="tpl-name">左右</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="top-bottom" onclick="switchLegoLayout('top-bottom', this)" title="上下结构 (如: 早, 森, 忠)">
+                <span class="tpl-icon">⿱</span>
+                <span class="tpl-name">上下</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="left-mid-right" onclick="switchLegoLayout('left-mid-right', this)" title="左中右结构 (如: 瓣, 树)">
+                <span class="tpl-icon">⿲</span>
+                <span class="tpl-name">左中右</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="top-mid-bottom" onclick="switchLegoLayout('top-mid-bottom', this)" title="上中下结构 (如: 莫, 草)">
+                <span class="tpl-icon">⿳</span>
+                <span class="tpl-name">上中下</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="surround" onclick="switchLegoLayout('surround', this)" title="全包围结构 (如: 国, 团)">
+                <span class="tpl-icon">⿴</span>
+                <span class="tpl-name">全包围</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="triplet" onclick="switchLegoLayout('triplet', this)" title="品字形/三叠字 (如: 鑫, 森, 淼, 垚)">
+                <span class="tpl-icon">品</span>
+                <span class="tpl-name">品字形</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="quad" onclick="switchLegoLayout('quad', this)" title="四叠字 (如: 㗊, 叕, 朤)">
+                <span class="tpl-icon">㗊</span>
+                <span class="tpl-name">四叠字</span>
+              </button>
+              <button class="lego-tpl-btn" data-layout="freeform" onclick="switchLegoLayout('freeform', this)" title="自由重叠/相交模式 (如: 巫, 串, 互)">
+                <span class="tpl-icon">⿻</span>
+                <span class="tpl-name">自由重叠</span>
+              </button>
+            </div>
+          </div>
+
+
+          <!-- 插槽选择与微调控制面板 -->
+          <div class="lego-transform-panel" id="legoTransformPanel">
+            <div class="lego-transform-header">
+              <span id="activeSlotTitle" class="active-slot-pill">插槽 A: [未放入部件]</span>
+              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <div class="slot-subdivide-wrap" style="display:flex; align-items:center; gap:6px;">
+                  <span style="font-size:12px; font-weight:600; color:#4a4039;">➗ 槽位骨架:</span>
+                  <select id="slotSubdivideSelect" class="lego-select-mini" onchange="changeSlotSubdivision(this.value)" style="padding: 3px 8px; border-radius: 6px; border: 1px solid #dcd3c5; background: #fff; font-size: 12px; color: #333; cursor: pointer; font-weight: 500;">
+                    <option value="none">独体部件 (默认)</option>
+                    <option value="left-right">左右结构 (⿰)</option>
+                    <option value="top-bottom">上下结构 (⿱)</option>
+                    <option value="left-mid-right">左中右结构 (⿲)</option>
+                    <option value="top-mid-bottom">上中下结构 (⿳)</option>
+                    <option value="triplet">品字形/三叠 (品)</option>
+                    <option value="surround">全包围结构 (⿴)</option>
+                    <option value="quad">四叠字结构 (㗊)</option>
+                  </select>
+                </div>
+                <div class="slot-select-tabs" id="slotSelectTabs">
+                  <!-- 动态生成当前模板的插槽切换 Tab: A / B / C... -->
+                </div>
+              </div>
+            </div>
+            <div class="lego-controls-grid">
+              <div class="control-item">
+                <label>水平位移 (X): <span id="valOffsetX">0</span>px</label>
+                <input type="range" id="ctrlOffsetX" min="-50" max="50" value="0" oninput="updateSlotTransform()" />
+              </div>
+              <div class="control-item">
+                <label>垂直位移 (Y): <span id="valOffsetY">0</span>px</label>
+                <input type="range" id="ctrlOffsetY" min="-50" max="50" value="0" oninput="updateSlotTransform()" />
+              </div>
+              <div class="control-item">
+                <label>横向缩放 (Scale X): <span id="valScaleX">1.0</span>x</label>
+                <input type="range" id="ctrlScaleX" min="0.3" max="2.0" step="0.05" value="1.0" oninput="updateSlotTransform()" />
+              </div>
+              <div class="control-item">
+                <label>纵向缩放 (Scale Y): <span id="valScaleY">1.0</span>x</label>
+                <input type="range" id="ctrlScaleY" min="0.3" max="2.0" step="0.05" value="1.0" oninput="updateSlotTransform()" />
+              </div>
+              <div class="control-item">
+                <label>微度旋转: <span id="valRotate">0</span>&deg;</label>
+                <input type="range" id="ctrlRotate" min="-45" max="45" value="0" oninput="updateSlotTransform()" />
+              </div>
+              <div class="control-item control-item-buttons">
+                <button class="lego-mini-btn" id="btnFlipX" onclick="toggleFlipX()">水平翻转</button>
+                <button class="lego-mini-btn" onclick="resetSlotTransform()">重置微调</button>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 米字格核心画布 -->
+          <div class="lego-canvas-wrapper">
+            <div class="lego-canvas-board with-mizige" id="legoArtboard">
+              <!-- SVG 矢量画布 (200x200 viewBox) -->
+              <svg id="legoSvgArtboard" viewBox="0 0 200 200" width="100%" height="100%">
+                <!-- 动态插槽部件图层 -->
+                <g id="legoSlotsContainer" fill="#1a1a1a"></g>
+              </svg>
+
+              <!-- 选中的插槽高亮框与插槽指示浮层 -->
+              <div id="legoSlotIndicators" class="lego-slot-indicators"></div>
+            </div>
+
+            <!-- 画布辅助按钮条 -->
+            <div class="lego-canvas-tools">
+              <div class="lego-guide-switch">
+                <button class="guide-btn active" data-grid="mizige" onclick="switchLegoGridGuide('mizige', this)">米字格</button>
+                <button class="guide-btn" data-grid="jiugongge" onclick="switchLegoGridGuide('jiugongge', this)">九宫格</button>
+                <button class="guide-btn" data-grid="none" onclick="switchLegoGridGuide('none', this)">无辅助线</button>
+              </div>
+              <div class="lego-canvas-actions">
+                <button class="canvas-btn" onclick="clearCurrentSlot()">清空当前插槽</button>
+                <button class="canvas-btn danger" onclick="resetAllSlots()">全部清空</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右栏：造字档案与导出中心 -->
+        <div class="lego-sidebar-right">
+          <!-- 1. 新字档案 -->
+          <div class="lego-panel-section">
+            <div class="lego-section-title">
+              <span>📜 新字档案</span>
+              <span class="lego-hint">赋予新字灵魂</span>
+            </div>
+            <div class="lego-form-group">
+              <label>自定拼音 (Pinyin):</label>
+              <div class="pinyin-input-row">
+                <input type="text" id="legoPinyin" class="lego-input" placeholder="输入拼音 (如 miao2 自动标调为 miáo)" oninput="handlePinyinInput(this)" />
+                <button type="button" class="pinyin-toggle-btn" onclick="togglePinyinKeyboard(event)" title="展开完整拼音声调字符表">
+                  <span>🔤 声调表</span>
+                </button>
+                <!-- 24 韵母全声调速选气泡浮层 -->
+                <div class="pinyin-keyboard-popover" id="pinyinKbPopover">
+                  <div class="pinyin-kb-row"><span class="pinyin-kb-label">a</span><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ā')">ā</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('á')">á</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǎ')">ǎ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('à')">à</button></div>
+                  <div class="pinyin-kb-row"><span class="pinyin-kb-label">o</span><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ō')">ō</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ó')">ó</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǒ')">ǒ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ò')">ò</button></div>
+                  <div class="pinyin-kb-row"><span class="pinyin-kb-label">e</span><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ē')">ē</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('é')">é</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ě')">ě</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('è')">è</button></div>
+                  <div class="pinyin-kb-row"><span class="pinyin-kb-label">i</span><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ī')">ī</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('í')">í</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǐ')">ǐ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ì')">ì</button></div>
+                  <div class="pinyin-kb-row"><span class="pinyin-kb-label">u</span><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ū')">ū</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ú')">ú</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǔ')">ǔ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ù')">ù</button></div>
+                  <div class="pinyin-kb-row"><span class="pinyin-kb-label">ü</span><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǖ')">ǖ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǘ')">ǘ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǚ')">ǚ</button><button type="button" class="pinyin-kb-btn" onclick="appendPinyinChar('ǜ')">ǜ</button></div>
+                </div>
+              </div>
+            </div>
+            <div class="lego-form-group">
+              <label>Unicode 结构 (IDS):</label>
+              <input type="text" id="legoIds" class="lego-input readonly" readonly value="⿰？" />
+            </div>
+            <div class="lego-form-group">
+              <label>造字法归属 (六书):</label>
+              <select id="legoLiushu" class="lego-select">
+                <option value="会意字">会意 (会合两意以成新字)</option>
+                <option value="形声字">形声 (半取其意，半取其声)</option>
+                <option value="象形字">象形 (依类象形而成字)</option>
+                <option value="指事字">指事 (视而可识，察而见意)</option>
+                <option value="转注字">转注 (展转相生)</option>
+                <option value="假借字">假借 (本无其字，依声托事)</option>
+              </select>
+            </div>
+            <div class="lego-form-group">
+              <label>字义训解 (Meaning):</label>
+              <textarea id="legoMeaning" class="lego-textarea" rows="3" placeholder="为此新汉字阐述字义、典故或造字背景..."></textarea>
+            </div>
+            <div class="lego-form-group">
+              <label>造字者署名 (Author):</label>
+              <input type="text" id="legoAuthor" class="lego-input" value="wanghonghui 敬造" />
+            </div>
+          </div>
+
+          <!-- 2. 导出与收录中心 -->
+          <div class="lego-panel-section">
+            <div class="lego-section-title">
+              <span>🚀 导出与收录</span>
+              <span class="lego-hint">数字化与出图</span>
+            </div>
+            <div class="lego-export-actions">
+              <button class="lego-btn-export primary" onclick="exportLegoSvg()" title="导出标准纯净 SVG 矢量文件">
+                <span>⚡ 导出矢量 SVG</span>
+              </button>
+              <button class="lego-btn-export" onclick="exportLegoPng()" title="导出 800x800 高清透明 PNG 图">
+                <span>🖼️ 导出高清 PNG</span>
+              </button>
+              <button class="lego-btn-export golden" onclick="generateLegoCard()" title="生成红印古风宣纸汉字档案卡">
+                <span>📜 宣纸造字档案卡</span>
+              </button>
+              <button class="lego-btn-export vault" onclick="saveToPersonalVault()" title="保存到本地浏览器字库，主站检索立即可见">
+                <span>💾 收录至自造字库</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 抽屉：我的自造字库 -->
+      <div class="lego-vault-drawer" id="legoVaultDrawer">
+        <div class="lego-vault-header">
+          <h3>我的自造字宝库 (My Custom Glyphs)</h3>
+          <button class="lego-close-btn" onclick="toggleLegoVault()">&times;</button>
+        </div>
+        <div class="lego-vault-list" id="legoVaultList">
+          <!-- 动态加载保存的自造字 -->
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 宣纸古典造字档案卡生成弹窗 -->
+  <div class="card-modal-overlay" id="legoCardModal" style="display:none;" onclick="if(event.target===this) closeCardModal();">
+    <div class="card-modal-box">
+      <div class="card-preview-area" id="legoCardExportArea">
+        <div class="card-inner-frame">
+          <div class="card-header-seal">
+            <div class="card-title-text">新造字譜</div>
+            <div class="card-seal-stamp">造</div>
+          </div>
+          <div class="card-glyph-container">
+            <div class="card-mizige-box" id="cardMizigeBox">
+              <!-- SVG 动态注入 -->
+            </div>
+          </div>
+          <div class="card-meta-line">
+            <span class="card-pinyin" id="cardPinyin">mi&aacute;o</span>
+            <span class="card-ids" id="cardIds">⿰日木</span>
+            <span class="card-liushu" id="cardLiushu">会意</span>
+          </div>
+          <div class="card-divider"></div>
+          <div class="card-meaning-text" id="cardMeaning">
+            字义解释...
+          </div>
+          <div class="card-footer-info">
+            <span id="cardAuthor">wanghonghui 敬造</span>
+            <span class="card-date" id="cardDate">甲辰年秋</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-modal-actions">
+        <button class="btn btn-primary" onclick="downloadLegoCardImage()">下载档案卡图片</button>
+        <button class="btn btn-secondary" onclick="closeCardModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全局轻提示浮层 -->
+  <div class="copy-toast" id="copyToast">已复制到剪贴板！</div>
+
+  <script src="/static/js/lego.js?v=2.2"></script>
+</body>
+</html>

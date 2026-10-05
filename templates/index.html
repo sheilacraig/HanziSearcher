@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏮 HanziSearcher - 汉字拆字与部件检索系统</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=2.2">
+  <link rel="stylesheet" href="/static/css/lego.css?v=2.2">
+</head>
+<body>
+  <div class="container">
+    <!-- 1. 顶部 Header -->
+    <header>
+      <div class="brand-title">
+        <div class="brand-seal">漢</div>
+        <div>
+          <h1 style="font-size: 20px; font-weight:700; color:var(--primary); margin:0; display:flex; align-items:center; gap:8px; white-space:nowrap;">
+            <span>HanziSearcher</span>
+          </h1>
+          <span class="subtitle-badge">汉字拆字与部件检索</span>
+        </div>
+      </div>
+
+      <!-- 顶部操作导航：汉字乐高与系统设置 -->
+      <div class="header-actions">
+        <a href="/lego" class="header-nav-btn lego-nav-btn" title="前往汉字乐高：拼装部首骨架，创造汉字与天书">
+          <span>汉字乐高</span>
+        </a>
+        <button class="header-nav-btn settings-btn" onclick="openSettingsModal()" title="设置米字格、字号与自定义字体">
+          <span>⚙️ 设置</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 3. 综合搜索控制台 (支持检索框 + 总笔画数 单独与组合检索) -->
+    <div class="search-panel">
+      <div class="search-row">
+        <div class="input-box-main">
+          <span class="search-prefix-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="输入部件(车 俞)、部首(氵)、结构(左右 木)、码位(U+690D)..." autofocus />
+          <span class="clear-icon" id="clearSearchIcon" onclick="clearInput('searchInput')">&times;</span>
+        </div>
+        <div class="input-box-strokes">
+          <span class="strokes-prefix-icon">✍️</span>
+          <input type="number" id="strokesInput" min="1" max="64" placeholder="总笔画数 (如: 8)" title="总笔画数：支持单独检索，或与检索框任意条件组合" />
+          <span class="clear-icon" id="clearStrokesIcon" onclick="clearInput('strokesInput')">&times;</span>
+        </div>
+        <button class="search-btn" id="searchBtn">搜 索</button>
+        <button class="reset-btn" id="resetBtn" title="清空检索框与笔画数">重 置</button>
+      </div>
+
+      <!-- 快捷场景预设胶囊 (Quick Presets) -->
+      <div class="presets-bar">
+        <span class="presets-label">💡 快捷体验:</span>
+        <span class="preset-chip" onclick="applyPreset('氵', 8)">🎯 氵 + 8画</span>
+        <span class="preset-chip" onclick="applyPreset('木', 8)">🎯 木 + 8画</span>
+        <span class="preset-chip" onclick="applyPreset('车 俞', 13)">🎯 车 俞 (部件交集)</span>
+        <span class="preset-chip" onclick="applyPreset('⿰木*', 8)">🎯 ⿰木* (左木8画)</span>
+        <span class="preset-chip" onclick="applyPreset('⿴囗*', '')">🎯 ⿴囗* (全包结构)</span>
+        <span class="preset-chip" onclick="applyPreset('回', '')">🎯 回 (简繁异体流变)</span>
+        <span class="preset-chip" onclick="applyPreset('', 8)">🎯 纯 8 画检索</span>
+      </div>
+
+      <!-- 4. 偏旁部首辅助输入面板 (默认折叠) -->
+      <div class="toolbox-wrapper">
+        <div class="toolbox-toggle-bar" onclick="toggleToolbox()" title="点击展开或折叠偏旁部首辅助输入面板">
+          <div class="toolbox-toggle-left">
+            <span>⌨️</span>
+            <span class="toolbox-toggle-title">偏旁部首与构字符号辅助输入</span>
+            <span class="toolbox-toggle-tags">(常用部首 · 结构与通配符 · 214 康熙部首)</span>
+          </div>
+          <span class="toolbox-toggle-indicator" id="toolboxToggleIndicator">展开 ▼</span>
+        </div>
+
+        <div class="toolbox-container" id="toolboxContainer" style="display: none;">
+          <div class="toolbox-tabs-header">
+            <button class="toolbox-tab-btn active" onclick="switchToolboxTab('tabRadicals', this)">常用/难打部首 (45)</button>
+            <button class="toolbox-tab-btn" onclick="switchToolboxTab('tabIdc', this)">结构与通配符号 (14)</button>
+            <button class="toolbox-tab-btn" onclick="switchToolboxTab('tabKangxi', this)">214 康熙部首检字表</button>
+          </div>
+
+        <!-- Tab 1: 常用/难打部首 -->
+        <div class="toolbox-content-panel active" id="tabRadicals">
+          <div style="font-size:12px; color:#8c7b70; margin-bottom:8px;">💡 针对拼音输入法难以直接打出的高频偏旁部首，点击直接快速键入：</div>
+          <div class="radicals-flex-grid" id="frequentRadicalsContainer"></div>
+        </div>
+
+        <!-- Tab 2: 结构与通配符号 -->
+        <div class="toolbox-content-panel" id="tabIdc">
+          <div style="font-size:12px; color:#8c7b70; margin-bottom:8px;">💡 点击插入 Unicode 表意文字描述字符 (IDC) 或通配符，支持别名如“左右”、“上下”：</div>
+          <div class="idc-flex-grid">
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿰')" title="左右结构 (如: ⿰木直 -> 植)"><b>⿰</b> 左右</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿱')" title="上下结构 (如: ⿱艹田 -> 苗)"><b>⿱</b> 上下</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿲')" title="左中右结构 (如: ⿲彳重亍 -> 衝)"><b>⿲</b> 左中右</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿳')" title="上中下结构 (如: ⿳亠口冖 -> 亭)"><b>⿳</b> 上中下</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿴')" title="全包围结构 (如: ⿴囗玉 -> 国)"><b>⿴</b> 全包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿵')" title="上三包下 (如: ⿵门日 -> 间)"><b>⿵</b> 上三包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿶')" title="下三包上 (如: ⿶凵凶 -> 凶)"><b>⿶</b> 下三包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿷')" title="左三包右 (如: ⿷匚矢 -> 医)"><b>⿷</b> 左三包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿸')" title="左上包 (如: ⿸广木 -> 床)"><b>⿸</b> 左上包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿹')" title="右上包 (如: ⿹气米 -> 气)"><b>⿹</b> 右上包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿺')" title="左下包 (如: ⿺辶车 -> 连)"><b>⿺</b> 左下包</button>
+            <button class="idc-action-btn" onmousedown="event.preventDefault();" onclick="insertSymbol('⿻')" title="相交重叠 (如: ⿻口丨 -> 中)"><b>⿻</b> 相交</button>
+            <button class="idc-action-btn wild" onmousedown="event.preventDefault();" onclick="insertSymbol('?')" title="单字符通配符"><b>?</b> 单字通配</button>
+            <button class="idc-action-btn wild" onmousedown="event.preventDefault();" onclick="insertSymbol('*')" title="任意字符串通配符"><b>*</b> 任意通配</button>
+          </div>
+        </div>
+
+        <!-- Tab 3: 214 康熙部首全表 (带快速笔画筛选) -->
+        <div class="toolbox-content-panel" id="tabKangxi">
+          <div class="kangxi-stroke-filter-bar" id="kangxiFilterBar">
+            <span style="font-size:12px; color:#888; margin-right:4px;">笔画过滤:</span>
+            <button class="stroke-nav-pill active" onclick="filterKangxi(0, this)">全部 (214)</button>
+          </div>
+          <div class="kangxi-scroll-body" id="kangxiListContainer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- 5. 检索状态条 -->
+    <div class="status-bar">
+      <div id="statusText">输入内容或指定总笔画数以开始检索（支持 9 万+ Unicode CJK 统一表意文字）</div>
+      <div id="countText"></div>
+    </div>
+
+    <!-- 6. 结果卡片网格 -->
+    <div class="results-grid" id="resultsGrid"></div>
+
+    <!-- 7. 优雅分页栏 -->
+    <div class="pagination-bar" id="paginationBar" style="display: none;">
+      <button class="page-nav-btn" id="prevPageBtn" onclick="changePage(currentPage - 1)">上一页</button>
+      <span class="page-info-text" id="pageInfoText">第 1 / 1 页 (共 0 条)</span>
+      <button class="page-nav-btn" id="nextPageBtn" onclick="changePage(currentPage + 1)">下一页</button>
+
+      <div class="page-jump-box">
+        <span>跳至</span>
+        <input type="number" class="jump-input" id="jumpPageInput" min="1" value="1" onkeydown="if(event.key==='Enter') jumpToPage()" />
+        <span>页</span>
+        <button class="page-nav-btn" style="padding: 4px 10px; font-size: 13px;" onclick="jumpToPage()">GO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 汉字血缘探针 & 流变谱系模态弹窗 -->
+  <div class="modal-overlay" id="familyModal" onclick="if(event.target===this) closeFamilyModal();">
+    <div class="family-modal">
+      <button class="modal-close-btn" onclick="closeFamilyModal();">&times;</button>
+      
+      <div class="modal-header-section">
+        <div class="modal-glyph-large with-mizige" id="modalGlyph"></div>
+        <div class="modal-char-info">
+          <h2 id="modalTitle">【汉字】</h2>
+          <div style="font-size: 13px; color: #666; margin-top: 4px;" id="modalMeta"></div>
+        </div>
+      </div>
+
+      <!-- 父系构件溯源 -->
+      <div class="tree-block">
+        <h3><span>🌱 构架源流（父部件溯源）:</span></h3>
+        <div class="parent-pill-list" id="modalParents"></div>
+      </div>
+
+      <!-- 变体与简繁流变谱系 -->
+      <div class="tree-block">
+        <h3><span>📜 变体与简繁流变谱系:</span></h3>
+        <div id="modalVariants" style="font-size: 13px; color: #444; line-height: 1.8;"></div>
+      </div>
+
+      <!-- 宗族衍生后裔 -->
+      <div class="tree-block">
+        <h3><span>🌳 宗族衍生繁衍（以此字为构件的衍生字）:</span></h3>
+        <div class="descendant-grid" id="modalDescendants"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 偏好设置模态弹窗 -->
+  <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this) closeSettingsModal();">
+    <div class="settings-modal">
+      <button class="modal-close-btn" onclick="closeSettingsModal();">&times;</button>
+      <div class="modal-header-section" style="margin-bottom: 16px; padding-bottom: 12px;">
+        <h2 style="font-size: 20px; display: flex; align-items: center; gap: 8px;">
+          <span>⚙️ 系统偏好设置</span>
+        </h2>
+      </div>
+
+      <!-- 设置项 1: 米字格辅助线 -->
+      <div class="setting-item">
+        <div class="setting-item-info">
+          <div class="setting-item-title">书法米字格辅助线</div>
+          <div class="setting-item-desc">在汉字字形卡片背景显示米字九宫辅助参考底纹</div>
+        </div>
+        <div class="setting-item-control">
+          <label class="view-switch">
+            <input type="checkbox" id="mizigeToggle" checked onchange="toggleMizige(this.checked)" />
+            <span>开启</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 设置项 2: 卡片字号 -->
+      <div class="setting-item">
+        <div class="setting-item-info">
+          <div class="setting-item-title">字形卡片显示尺寸</div>
+          <div class="setting-item-desc">调整检索结果列表中字形主卡片的显示网格大小</div>
+        </div>
+        <div class="setting-item-control">
+          <div class="size-btn-group">
+            <button class="size-btn" onclick="setGridSize('compact', this)">紧凑</button>
+            <button class="size-btn active" onclick="setGridSize('normal', this)">标准</button>
+            <button class="size-btn" onclick="setGridSize('large', this)">特大</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置项 3: 自定义字体管理 -->
+      <div class="setting-item" style="border-bottom: none; flex-direction: column; align-items: flex-start; gap: 10px;">
+        <div class="setting-item-info">
+          <div class="setting-item-title">自定义字体渲染 (TTF / OTF / WOFF)</div>
+          <div class="setting-item-desc">上传自制字体优先渲染汉字；未覆盖字形自动降级为矢量 SVG。</div>
+        </div>
+        <div class="font-studio-box" id="fontStudioPanel">
+          <div class="font-info-wrap">
+            <div class="font-pulse-dot" id="fontStatusDot"></div>
+            <div>
+              <div class="font-status-title" id="fontStatusTitle">
+                <span>当前字形源: 默认 SVG 矢量直出</span>
+              </div>
+              <div class="font-status-desc" id="fontStatusDesc">
+                未加载自定义字体，所有汉字均采用矢量 SVG 呈现。支持拖拽 TTF / OTF 到此处一键加载。
+              </div>
+            </div>
+          </div>
+          <div class="font-action-buttons" style="margin-top: 10px;">
+            <input type="file" id="fontFileInput" accept=".ttf,.otf,.woff,.woff2" style="display:none;" />
+            <button class="font-tool-btn" onclick="document.getElementById('fontFileInput').click()" title="支持 TTF, OTF, WOFF 等常用字体文件">
+              <span>📤 上传字体文件</span>
+            </button>
+            <button class="font-tool-btn btn-reset" id="resetFontBtn" onclick="resetToDefaultSvg()" style="display:none;" title="清除当前自定义字体，恢复默认全量 SVG 显示">
+              <span>✕ 恢复默认 SVG 渲染</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="copy-toast" id="copyToast">已复制到剪贴板！</div>
+
+  <script src="/static/js/app.js?v=2.2"></script>
+</body>
+</html>

@@ -1,0 +1,1295 @@
+/* ==========================================================================
+       🧱 汉字乐高专属样式
+       ========================================================================== */
+    .header-badge-lego {
+      background: linear-gradient(135deg, #d35400, #b83b26) !important;
+      color: #fff !important;
+      border: none !important;
+      font-size: 11px !important;
+      padding: 2px 7px !important;
+      border-radius: 10px !important;
+      box-shadow: 0 2px 6px rgba(184, 59, 38, 0.3) !important;
+    }
+
+    .lego-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(30, 24, 20, 0.72);
+      backdrop-filter: blur(6px);
+      z-index: 2500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .lego-window {
+      width: 95vw;
+      max-width: 1380px;
+      height: 92vh;
+      max-height: 920px;
+      background: #faf8f5;
+      border: 1px solid #ebdcd0;
+      border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 顶部标题栏 */
+    .lego-header {
+      padding: 14px 24px;
+      background: #ffffff;
+      border-bottom: 1px solid #ebdcd0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .lego-header-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .lego-seal {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #b83b26, #8e2817);
+      color: #fff;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-serif);
+      font-size: 20px;
+      font-weight: bold;
+      box-shadow: 0 2px 8px rgba(184, 59, 38, 0.25);
+    }
+
+    .lego-header-title h2 {
+      font-size: 19px;
+      color: #2c3e50;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .lego-tag {
+      font-size: 11px;
+      color: var(--primary);
+      background: var(--primary-light);
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: normal;
+      border: 1px solid rgba(184, 59, 38, 0.2);
+    }
+
+    .lego-desc {
+      font-size: 12px;
+      color: #7f8c8d;
+    }
+
+    .lego-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .lego-tool-btn {
+      background: #faf8f5;
+      border: 1px solid #ebdcd0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #4a4039;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .lego-tool-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: #ffffff;
+    }
+
+    .lego-close-btn {
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      color: #999;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .lego-close-btn:hover {
+      background: #eee;
+      color: #333;
+    }
+
+    /* 汉字乐高主体三栏布局 */
+    .lego-body {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 290px 1fr 330px;
+      overflow: hidden;
+      background: #f7f4ee;
+    }
+
+    /* 左栏：积木部件栏 */
+    .lego-sidebar-left {
+      background: #ffffff;
+      border-right: 1px solid #ebdcd0;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .lego-panel-section {
+      background: #faf8f5;
+      border: 1px solid #ebdcd0;
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .lego-section-title {
+      font-size: 13px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .lego-hint {
+      font-size: 11px;
+      font-weight: normal;
+      color: #999;
+    }
+
+    .lego-disassemble-box {
+      display: flex;
+      gap: 8px;
+    }
+
+    .lego-input {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid #dcd3c5;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #fff;
+      color: #333;
+      outline: none;
+      transition: border 0.15s;
+    }
+
+    .lego-input:focus {
+      border-color: var(--primary);
+    }
+
+    .lego-btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 0 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+
+    .lego-btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .lego-btn-secondary {
+      background: #ece5dc;
+      color: #4a4039;
+      border: 1px solid #dcd3c5;
+      padding: 0 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .lego-btn-secondary:hover {
+      background: #ded5c7;
+    }
+
+    .lego-disassemble-results {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 44px;
+      background: #fff;
+      border: 1px dashed #dcd3c5;
+      border-radius: 8px;
+      padding: 8px;
+      align-items: center;
+    }
+
+    .lego-empty-tip {
+      font-size: 11px;
+      color: #aaa;
+      width: 100%;
+      text-align: center;
+    }
+
+    .lego-category-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+      background: #eee8de;
+      padding: 3px;
+      border-radius: 8px;
+    }
+
+    .lego-tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 5px 0;
+      font-size: 12px;
+      color: #666;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+
+    .lego-tab.active {
+      background: #ffffff;
+      color: var(--primary);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      font-weight: bold;
+    }
+
+    .lego-bricks-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      max-height: 250px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .lego-comp-brick {
+      aspect-ratio: 1;
+      background: #ffffff;
+      border: 1px solid #ded5c7;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+      user-select: none;
+    }
+
+    .lego-comp-brick:hover {
+      border-color: var(--primary);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 10px rgba(184, 59, 38, 0.16);
+    }
+
+    .lego-comp-brick .brick-glyph {
+      width: 70%;
+      height: 70%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .lego-comp-brick .brick-glyph svg {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .lego-comp-brick .brick-glyph span {
+      font-size: 20px;
+      font-family: var(--font-serif);
+      color: #2c3e50;
+    }
+
+    .lego-comp-brick .brick-char-label {
+      font-size: 10px;
+      color: #888;
+      line-height: 1;
+      margin-top: 2px;
+    }
+
+    /* 中栏：拼装主舞台与画布 */
+    .lego-main-stage {
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      align-items: center;
+    }
+
+    /* 骨架模板选择条 */
+    .lego-templates-bar {
+      width: 100%;
+      background: #ffffff;
+      border: 1px solid #ebdcd0;
+      border-radius: 12px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .lego-templates-label {
+      font-size: 13px;
+      font-weight: bold;
+      color: #4a4039;
+      white-space: nowrap;
+    }
+
+    .lego-templates-list {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      flex: 1;
+    }
+
+    .lego-tpl-btn {
+      background: #faf8f5;
+      border: 1px solid #dcd3c5;
+      padding: 6px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .lego-tpl-btn:hover {
+      border-color: var(--primary);
+      background: #fff;
+    }
+
+    .lego-tpl-btn.active {
+      background: var(--primary-light);
+      border-color: var(--primary);
+      color: var(--primary);
+      font-weight: bold;
+      box-shadow: 0 2px 6px rgba(184, 59, 38, 0.15);
+    }
+
+    .tpl-icon {
+      font-family: var(--font-serif);
+      font-size: 15px;
+    }
+
+    .tpl-name {
+      font-size: 12px;
+    }
+
+    /* 画布与米字格区域 */
+    .lego-canvas-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .lego-canvas-board {
+      width: 320px;
+      height: 320px;
+      background: #faf8f5;
+      border: 2px solid #b83b26;
+      border-radius: 16px;
+      position: relative;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* 米字格与九宫格背景辅线 */
+    .lego-canvas-board.with-mizige::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: 
+        linear-gradient(to right, transparent calc(50% - 0.5px), rgba(184, 59, 38, 0.28) calc(50% - 0.5px), rgba(184, 59, 38, 0.28) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+        linear-gradient(to bottom, transparent calc(50% - 0.5px), rgba(184, 59, 38, 0.28) calc(50% - 0.5px), rgba(184, 59, 38, 0.28) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+        linear-gradient(45deg, transparent calc(50% - 0.5px), rgba(184, 59, 38, 0.18) calc(50% - 0.5px), rgba(184, 59, 38, 0.18) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+        linear-gradient(-45deg, transparent calc(50% - 0.5px), rgba(184, 59, 38, 0.18) calc(50% - 0.5px), rgba(184, 59, 38, 0.18) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+      z-index: 1;
+    }
+
+    .lego-canvas-board.with-jiugongge::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: 
+        linear-gradient(to right, transparent 33.3%, rgba(184, 59, 38, 0.2) 33.3%, rgba(184, 59, 38, 0.2) calc(33.3% + 1px), transparent calc(33.3% + 1px), transparent 66.6%, rgba(184, 59, 38, 0.2) 66.6%, rgba(184, 59, 38, 0.2) calc(66.6% + 1px), transparent calc(66.6% + 1px)),
+        linear-gradient(to bottom, transparent 33.3%, rgba(184, 59, 38, 0.2) 33.3%, rgba(184, 59, 38, 0.2) calc(33.3% + 1px), transparent calc(33.3% + 1px), transparent 66.6%, rgba(184, 59, 38, 0.2) 66.6%, rgba(184, 59, 38, 0.2) calc(66.6% + 1px), transparent calc(66.6% + 1px));
+      z-index: 1;
+    }
+
+    #legoSvgArtboard {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+    }
+
+    .lego-slot-indicators {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .slot-rect-indicator {
+      position: absolute;
+      border: 1.5px dashed rgba(44, 62, 80, 0.4);
+      border-radius: 6px;
+      transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto; /* 允许捕获鼠标事件 */
+      cursor: pointer;      /* 手型光标 */
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    .slot-rect-indicator:hover {
+      border-color: var(--primary);
+      background: rgba(184, 59, 38, 0.06);
+      box-shadow: 0 0 10px rgba(184, 59, 38, 0.2);
+    }
+
+    .slot-rect-indicator:active {
+      transform: scale(0.985);
+    }
+
+    .slot-rect-indicator.active {
+      border: 2px solid var(--primary);
+      background: rgba(184, 59, 38, 0.08);
+      box-shadow: 0 0 14px rgba(184, 59, 38, 0.25);
+    }
+
+    .slot-pill-tag {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      background: #ffffff;
+      color: #666;
+      border: 1px solid #dcd3c5;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-weight: bold;
+      pointer-events: none;
+      transition: all 0.15s;
+    }
+
+    .slot-rect-indicator:hover .slot-pill-tag {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .slot-rect-indicator.active .slot-pill-tag {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+      box-shadow: 0 2px 4px rgba(184, 59, 38, 0.3);
+    }
+
+    /* 画布辅助按钮条 */
+    .lego-canvas-tools {
+      display: flex;
+      justify-content: space-between;
+      width: 320px;
+      align-items: center;
+    }
+
+    .lego-guide-switch {
+      display: flex;
+      background: #ebdcd0;
+      padding: 2px;
+      border-radius: 6px;
+      gap: 2px;
+    }
+
+    .guide-btn {
+      border: none;
+      background: transparent;
+      padding: 3px 8px;
+      font-size: 11px;
+      color: #666;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .guide-btn.active {
+      background: #fff;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .lego-canvas-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .canvas-btn {
+      background: #faf8f5;
+      border: 1px solid #ebdcd0;
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      color: #555;
+      transition: all 0.15s;
+    }
+
+    .canvas-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .canvas-btn.danger:hover {
+      border-color: #c0392b;
+      color: #c0392b;
+    }
+
+    /* 插槽选择与微调控制面板 */
+    .lego-transform-panel {
+      width: 100%;
+      background: #ffffff;
+      border: 1px solid #ebdcd0;
+      border-radius: 12px;
+      padding: 14px 18px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .lego-transform-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #f0ece3;
+    }
+
+    .active-slot-pill {
+      font-size: 13px;
+      font-weight: bold;
+      color: var(--primary);
+    }
+
+    .slot-select-tabs {
+      display: flex;
+      gap: 4px;
+    }
+
+    .slot-tab {
+      padding: 3px 10px;
+      border-radius: 6px;
+      border: 1px solid #dcd3c5;
+      background: #faf8f5;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .slot-tab.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .lego-controls-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px 18px;
+    }
+
+    .control-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .control-item label {
+      font-size: 11px;
+      color: #666;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .control-item label span {
+      font-weight: bold;
+      color: #2c3e50;
+    }
+
+    .control-item input[type="range"] {
+      width: 100%;
+      height: 4px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    .control-item-buttons {
+      flex-direction: row;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .lego-mini-btn {
+      flex: 1;
+      padding: 6px 0;
+      border: 1px solid #dcd3c5;
+      background: #faf8f5;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #555;
+      transition: all 0.15s;
+    }
+
+    .lego-mini-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: #fff;
+    }
+
+    /* 右栏：造字档案与导出中心 */
+    .lego-sidebar-right {
+      background: #ffffff;
+      border-left: 1px solid #ebdcd0;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .lego-form-group {
+      margin-bottom: 10px;
+    }
+
+    .lego-form-group label {
+      display: block;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    .pinyin-input-row {
+      display: flex;
+      gap: 6px;
+      position: relative;
+    }
+
+    .pinyin-toggle-btn {
+      border: 1px solid #dcd3c5;
+      background: #faf8f5;
+      border-radius: 6px;
+      padding: 0 9px;
+      font-size: 11.5px;
+      cursor: pointer;
+      color: #666;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+
+    .pinyin-toggle-btn:hover {
+      background: var(--primary-light);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .pinyin-keyboard-popover {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      background: #ffffff;
+      border: 1px solid #ebdcd0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      z-index: 100;
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      width: 210px;
+    }
+
+    .pinyin-keyboard-popover.open {
+      display: flex;
+    }
+
+    .pinyin-kb-row {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .pinyin-kb-label {
+      font-size: 11px;
+      color: #888;
+      width: 14px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .pinyin-kb-btn {
+      flex: 1;
+      border: 1px solid #e8e2d8;
+      background: #faf8f5;
+      border-radius: 4px;
+      padding: 3px 0;
+      font-size: 13px;
+      text-align: center;
+      cursor: pointer;
+      color: #2c3e50;
+      transition: all 0.12s;
+    }
+
+    .pinyin-kb-btn:hover {
+      background: var(--primary-light);
+      border-color: var(--primary);
+      color: var(--primary);
+      transform: translateY(-1px);
+    }
+
+    .lego-input.readonly {
+      background: #faf8f5;
+      color: var(--primary);
+      font-weight: bold;
+      cursor: default;
+    }
+
+    .lego-select {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #dcd3c5;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #fff;
+      color: #333;
+      outline: none;
+    }
+
+    .lego-textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dcd3c5;
+      border-radius: 8px;
+      font-size: 12px;
+      background: #fff;
+      color: #333;
+      outline: none;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+
+    .lego-textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .lego-export-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .lego-btn-export,
+    .lego-btn-action {
+      border: 1px solid #e2d6c8;
+      background: #ffffff;
+      padding: 11px 16px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #2c3e50;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      user-select: none;
+    }
+
+    .lego-btn-export:hover,
+    .lego-btn-action:hover {
+      transform: translateY(-1.5px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      border-color: #c9bbae;
+    }
+
+    .lego-btn-export:active,
+    .lego-btn-action:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    /* 1. 导出矢量 SVG - 丹砂朱红核心主按钮 */
+    .lego-btn-export.primary,
+    .lego-btn-action.primary {
+      background: linear-gradient(135deg, #fff7f5 0%, #ffedea 100%);
+      border-color: rgba(184, 59, 38, 0.35);
+      color: var(--primary);
+    }
+    .lego-btn-export.primary:hover,
+    .lego-btn-action.primary:hover {
+      background: linear-gradient(135deg, #ffede8 0%, #ffe3dc 100%);
+      border-color: var(--primary);
+      box-shadow: 0 4px 12px rgba(184, 59, 38, 0.16);
+    }
+
+    /* 2. 导出高清 PNG - 墨色清雅风格 */
+    .lego-btn-export:not(.primary):not(.golden):not(.vault) {
+      background: #faf8f5;
+      border-color: #ebdcd0;
+      color: #3e3830;
+    }
+    .lego-btn-export:not(.primary):not(.golden):not(.vault):hover {
+      background: #ffffff;
+      border-color: #8c7b70;
+      color: #111111;
+    }
+
+    /* 3. 宣纸造字档案卡 - 古风雅致黄麻金粟风格 */
+    .lego-btn-export.golden,
+    .lego-btn-action.gold {
+      background: linear-gradient(135deg, #fdfbf5 0%, #fcf4e3 100%);
+      border-color: rgba(180, 136, 17, 0.4);
+      color: #8a6414;
+    }
+    .lego-btn-export.golden:hover,
+    .lego-btn-action.gold:hover {
+      background: linear-gradient(135deg, #fbf2dc 0%, #f9e9c7 100%);
+      border-color: #b48811;
+      box-shadow: 0 4px 12px rgba(180, 136, 17, 0.18);
+    }
+
+    /* 4. 收录至自造字库 - 暖木琥珀风格 */
+    .lego-btn-export.vault,
+    .lego-btn-action.warm {
+      background: linear-gradient(135deg, #fffbf6 0%, #fdf3e7 100%);
+      border-color: rgba(211, 84, 0, 0.35);
+      color: #d35400;
+    }
+    .lego-btn-export.vault:hover,
+    .lego-btn-action.warm:hover {
+      background: linear-gradient(135deg, #fef0de 0%, #fce4c8 100%);
+      border-color: #d35400;
+      box-shadow: 0 4px 12px rgba(211, 84, 0, 0.16);
+    }
+
+    /* 我的自造字抽屉 */
+    .lego-vault-drawer {
+      position: absolute;
+      top: 0;
+      right: -360px;
+      width: 360px;
+      height: 100%;
+      background: #ffffff;
+      box-shadow: -8px 0 24px rgba(0,0,0,0.15);
+      z-index: 10;
+      transition: right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .lego-vault-drawer.open {
+      right: 0;
+    }
+
+    .lego-vault-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #ebdcd0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .lego-vault-header h3 {
+      font-size: 16px;
+      color: #2c3e50;
+    }
+
+    .lego-vault-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .vault-card {
+      background: #faf8f5;
+      border: 1px solid #ebdcd0;
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      transition: all 0.15s;
+    }
+
+    .vault-card:hover {
+      border-color: var(--primary);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.05);
+    }
+
+    .vault-glyph-preview {
+      width: 48px;
+      height: 48px;
+      background: #ffffff;
+      border: 1px solid #ded5c7;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .vault-glyph-preview svg {
+      width: 80%;
+      height: 80%;
+    }
+
+    .vault-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .vault-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .vault-name {
+      font-weight: bold;
+      font-size: 14px;
+      color: #2c3e50;
+    }
+
+    .vault-pinyin {
+      font-size: 12px;
+      color: var(--primary);
+    }
+
+    .vault-desc {
+      font-size: 11px;
+      color: #888;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .vault-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .vault-btn {
+      border: none;
+      background: transparent;
+      padding: 4px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #777;
+      border-radius: 4px;
+    }
+
+    .vault-btn:hover {
+      background: #eee;
+      color: #333;
+    }
+
+    /* 宣纸古典造字档案卡预览模态弹窗 */
+    .card-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(20, 16, 14, 0.78);
+      backdrop-filter: blur(8px);
+      z-index: 3200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .card-modal-box {
+      background: #2b2521;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .card-preview-area {
+      width: 380px;
+      background: #fbf7ee;
+      border: 8px solid #c2a688;
+      border-radius: 4px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      position: relative;
+    }
+
+    .card-inner-frame {
+      border: 2px solid #b83b26;
+      padding: 18px 14px;
+      position: relative;
+      background: #faf5ea;
+    }
+
+    .card-inner-frame::after {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border: 0.5px solid rgba(184, 59, 38, 0.4);
+      pointer-events: none;
+    }
+
+    .card-header-seal {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .card-title-text {
+      font-family: var(--font-serif);
+      font-size: 18px;
+      letter-spacing: 2px;
+      color: #2c3e50;
+      font-weight: bold;
+    }
+
+    .card-seal-stamp {
+      width: 28px;
+      height: 28px;
+      background: #b83b26;
+      color: #fff;
+      font-family: var(--font-serif);
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(184, 59, 38, 0.4);
+    }
+
+    .card-glyph-container {
+      display: flex;
+      justify-content: center;
+      margin: 12px 0;
+    }
+
+    .card-mizige-box {
+      width: 170px;
+      height: 170px;
+      background: #fdfaf4;
+      border: 1px solid #d4a373;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-mizige-box::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: 
+        linear-gradient(to right, transparent 49.5%, rgba(184, 59, 38, 0.25) 49.5%, rgba(184, 59, 38, 0.25) 50.5%, transparent 50.5%),
+        linear-gradient(to bottom, transparent 49.5%, rgba(184, 59, 38, 0.25) 49.5%, rgba(184, 59, 38, 0.25) 50.5%, transparent 50.5%),
+        linear-gradient(45deg, transparent 49.5%, rgba(184, 59, 38, 0.15) 49.5%, rgba(184, 59, 38, 0.15) 50.5%, transparent 50.5%),
+        linear-gradient(-45deg, transparent 49.5%, rgba(184, 59, 38, 0.15) 49.5%, rgba(184, 59, 38, 0.15) 50.5%, transparent 50.5%);
+      pointer-events: none;
+    }
+
+    .card-mizige-box svg {
+      width: 85%;
+      height: 85%;
+      position: relative;
+      z-index: 2;
+    }
+
+    .card-meta-line {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .card-pinyin {
+      font-weight: bold;
+      color: var(--primary);
+      letter-spacing: 0.5px;
+    }
+
+    .card-ids {
+      font-family: var(--font-serif);
+      color: #666;
+    }
+
+    .card-liushu {
+      background: #ebdcd0;
+      color: #4a4039;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    .card-divider {
+      height: 1px;
+      background: linear-gradient(to right, transparent, rgba(184, 59, 38, 0.3), transparent);
+      margin: 10px 0;
+    }
+
+    .card-meaning-text {
+      font-family: var(--font-serif);
+      font-size: 13px;
+      color: #3a322c;
+      line-height: 1.7;
+      text-align: justify;
+      min-height: 48px;
+    }
+
+    .card-footer-info {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 14px;
+      font-size: 11px;
+      color: #8c7b70;
+    }
+
+    .card-modal-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* 主站自创字标贴 */
+    .badge-custom-glyph {
+      background: linear-gradient(135deg, #d35400, #b83b26) !important;
+      color: #fff !important;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+
+.lego-select-mini {
+  padding: 3px 6px;
+  font-size: 11px;
+  border: 1px solid #dcd3c5;
+  border-radius: 6px;
+  background: #faf8f5;
+  color: #333;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.lego-select-mini:focus {
+  border-color: var(--primary);
+}
+
+/* ==========================================================================
+   🧱 汉字乐高独立页面专属全屏布局样式 (Standalone Page)
+   ========================================================================== */
+.lego-standalone-body {
+  height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg);
+  background-image: radial-gradient(#e7dfd1 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.lego-page-header {
+  background: transparent;
+  border-bottom: none;
+  box-shadow: none;
+  padding: 12px 24px 14px 24px;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.lego-standalone-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 68px);
+  overflow: hidden;
+  position: relative;
+  padding: 0 24px 16px 24px;
+  box-sizing: border-box;
+}
+
+.lego-standalone-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #ebdcd0;
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  background: #f7f4ee;
+}
+
+.lego-standalone-workspace .lego-body {
+  height: 100%;
+}

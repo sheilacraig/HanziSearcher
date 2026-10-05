@@ -565,3 +565,158 @@ class HanziEngine:
             "total_pages": math.ceil(total / page_size) if total > 0 else 0,
             "results": results
         }
+
+    def get_component_svg(self, char_or_comp: str) -> Optional[str]:
+        """
+        获取单字或部件的解压后 SVG 矢量字符串。
+        优先按字符查询，若未命中则按 Unicode 码位查询。
+        """
+        if not char_or_comp:
+            return None
+        char = char_or_comp.strip()
+        if not char:
+            return None
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 1. 直接按字符对应码位查询
+        code_point = ord(char[0]) if len(char) == 1 else None
+
+        if code_point is not None:
+            cursor.execute("""
+                SELECT s.svg_data 
+                FROM character_svgs s
+                WHERE s.code_point = ?
+            """, (code_point,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                try:
+                    return zlib.decompress(row[0]).decode('utf-8')
+                except Exception:
+                    pass
+
+        # 2. 从 characters 表联合查询（兼容部首字符或变体）
+        cursor.execute("""
+            SELECT s.svg_data
+            FROM characters c
+            JOIN character_svgs s ON c.code_point = s.code_point
+            WHERE c.character = ? OR c.code_point = ?
+            LIMIT 1
+        """, (char, code_point))
+        row = cursor.fetchone()
+        if row and row[0]:
+            try:
+                return zlib.decompress(row[0]).decode('utf-8')
+            except Exception:
+                pass
+        return None
+
+    def disassemble_char(self, char: str) -> Dict[str, Any]:
+        """
+        拆解输入字符为乐高部件积木。
+        返回原字符元数据、结构、直接部件、以及各部件的 SVG 矢量数据。
+        """
+        char = char.strip()
+        if not char:
+            return {"error": "请输入有效字符"}
+
+        target = char[0]
+        code_point = ord(target)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT c.character, c.hex_code, c.ids_direct, c.ids_tokens, c.radical, c.total_strokes, c.pinyin, s.svg_data
+            FROM characters c
+            LEFT JOIN character_svgs s ON c.code_point = s.code_point
+            WHERE c.code_point = ?
+        """, (code_point,))
+        row = cursor.fetchone()
+
+        # 若不在数据库中，提供兜底对象
+        if not row:
+            return {
+                "character": target,
+                "hex_code": f"U+{code_point:04X}",
+                "ids_direct": target,
+                "pinyin": "",
+                "total_strokes": None,
+                "svg_data": None,
+                "components": [{"char": target, "hex_code": f"U+{code_point:04X}", "svg_data": None}]
+            }
+
+        c_char, hex_code, ids_direct, ids_tokens, radical, total_strokes, pinyin, raw_svg = row
+
+        full_svg = None
+        if raw_svg:
+            try:
+                full_svg = zlib.decompress(raw_svg).decode('utf-8')
+            except Exception:
+                pass
+
+        # 解析部件列表
+        tokens = [t.strip() for t in (ids_tokens or "").split(",") if t.strip()]
+
+        clean_direct = []
+        if ids_direct:
+            for ch in ids_direct:
+                if ch not in IDC_CHARS and not ch.isspace() and ch not in "[]GTKVJZ":
+                    if ch not in clean_direct:
+                        clean_direct.append(ch)
+
+        # 合并去重候选部件
+        all_comp_chars = []
+        for ch in clean_direct:
+            if ch not in all_comp_chars:
+                all_comp_chars.append(ch)
+        for t in tokens:
+            if t not in all_comp_chars:
+                all_comp_chars.append(t)
+        if target not in all_comp_chars:
+            all_comp_chars.append(target)
+
+        # 批量获取部件 SVG 矢量
+        components = []
+        for comp_char in all_comp_chars:
+            comp_svg = self.get_component_svg(comp_char)
+            components.append({
+                "char": comp_char,
+                "hex_code": f"U+{ord(comp_char[0]):04X}",
+                "svg_data": comp_svg
+            })
+
+        return {
+            "character": target,
+            "hex_code": hex_code,
+            "ids_direct": ids_direct,
+            "pinyin": pinyin,
+            "total_strokes": total_strokes,
+            "svg_data": full_svg,
+            "components": components
+        }
+
+    def get_preset_radicals(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        获取预置分类优质汉字部件/部首积木库，供汉字乐高直接取用。
+        """
+        presets = {
+            "自然天地": ["日", "月", "水", "氵", "火", "灬", "木", "土", "金", "钅", "石", "山", "雨", "风", "田", "气"],
+            "人体生灵": ["人", "亻", "手", "扌", "心", "忄", "口", "目", "足", "女", "子", "耳", "舌", "身", "犭", "鸟", "鱼", "虫", "马"],
+            "建筑器物": ["门", "宀", "广", "穴", "车", "舟", "刀", "刂", "弓", "矢", "戈", "斤", "衣", "衤", "巾", "皿", "鼎", "缶"],
+            "形意框架": ["囗", "辶", "走", "阝", "彡", "页", "竹", "艹", "禾", "米", "聿", "酉", "示", "礻", "言", "讠", "食", "饣"]
+        }
+
+        result = {}
+        for category, char_list in presets.items():
+            cat_items = []
+            for ch in char_list:
+                svg = self.get_component_svg(ch)
+                cat_items.append({
+                    "char": ch,
+                    "hex_code": f"U+{ord(ch[0]):04X}",
+                    "svg_data": svg
+                })
+            result[category] = cat_items
+        return result
+
