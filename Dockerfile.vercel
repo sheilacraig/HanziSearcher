@@ -14,6 +14,22 @@ COPY server ./server
 COPY static ./static
 COPY templates ./templates
 
+# Vercel Web Analytics (HTML variant), injected at build time so templates on main stay untouched
+# and main -> vercel merges never conflict. Every HTML page the server returns (/, /index.html,
+# /chars, /chars.html, /lego, /lego.html) is rendered from templates/*.html, so patching the
+# templates covers all of them. The build fails if any template lacks exactly one </head> or the
+# snippet doesn't land exactly once. Enable Analytics in the Vercel dashboard first; if it shows a
+# different script path, override with a build arg / change the default below.
+ARG VERCEL_ANALYTICS_SCRIPT_SRC=/_vercel/insights/script.js
+RUN set -e; \
+    ls /app/templates/*.html >/dev/null; \
+    for f in /app/templates/*.html; do \
+      test "$(grep -o '</head>' "$f" | wc -l)" -eq 1 || { echo "ERROR: $f must contain exactly one </head>" >&2; exit 1; }; \
+      python -c "import sys; p, src = sys.argv[1:]; s = '<!-- vercel-web-analytics --><script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script><script defer src=\"%s\"></script>' % src; t = open(p, encoding='utf-8').read(); open(p, 'w', encoding='utf-8').write(t.replace('</head>', s + '\n</head>', 1))" "$f" "$VERCEL_ANALYTICS_SCRIPT_SRC"; \
+      test "$(grep -o 'vercel-web-analytics' "$f" | wc -l)" -eq 1 || { echo "ERROR: analytics injection failed for $f" >&2; exit 1; }; \
+      echo "analytics injected: $f"; \
+    done
+
 # 1) Download the ~164MB SQLite DB from GitHub Releases (pinned to v1.0.0) into a read-only location.
 # 2) Point ./data at /tmp/hsdata: the app writes uploaded fonts to data/custom_font.ttf, and on
 #    Vercel only /tmp may be writable. hanzi.db is symlinked back in at container start (see CMD).
