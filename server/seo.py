@@ -42,6 +42,20 @@ DEFAULT_LANG = "zh-CN"
 # 社交分享预览图（部署时换成真实可访问的绝对 URL）
 OG_IMAGE = "/static/og-cover.svg"
 
+# ============ 站长平台验证 ============
+
+# Google Search Console 验证串。
+# 从 GSC「网址前缀」方式验证时拿到的是 content 值，形如：
+#   <meta name="google-site-verification" content="AbC123..." />
+# 只填引号里的那串 token，不要连标签一起贴。
+# 留空则完全不输出该标签（本地开发 / 未验证时保持页面干净）。
+# 提示：若用「域名」方式（DNS TXT）验证，无需在页面里放任何标签，
+#       本项保持为空即可，但那样就要去 DNS 服务商加解析记录。
+GSC_VERIFICATION: Optional[str] = ""
+
+# 百度站长平台同理（HTML 标签方式）。留空则不输出。
+BAIDU_VERIFICATION: Optional[str] = ""
+
 # 各页面的元数据：(title, description, 优先级)
 # 优先级影响 sitemap 中的相对权重，也影响页面间的重要度传递
 PAGE_META: Dict[str, Dict[str, str]] = {
@@ -134,6 +148,26 @@ def _esc(text: str) -> str:
     return html.escape(text or "", quote=True)
 
 
+def build_verification_tags() -> List[str]:
+    """
+    生成站长平台验证用 meta 标签。
+
+    集中在此处而非散落到各模板：验证串只配一次，全站三个页面同时生效，
+    避免「首页验证通过、/chars 忘了加」这类漏配。
+
+    纯静态标签，不加载任何外部脚本，对首屏性能零影响。
+    """
+    tags: List[str] = []
+    for name, token in (
+        ("google-site-verification", GSC_VERIFICATION),
+        ("baidu-site-verification", BAIDU_VERIFICATION),
+    ):
+        token = (token or "").strip()
+        if token:
+            tags.append(f'<meta name="{name}" content="{_esc(token)}" />')
+    return tags
+
+
 def build_meta_tags(
     page_key: str,
     canonical_path: Optional[str] = None,
@@ -172,6 +206,9 @@ def build_meta_tags(
         # 明确告诉爬虫这是简体中文站，避免误判为多语言版本
         f'<meta name="robots" content="index,follow,max-image-preview:large" />',
     ]
+
+    # 站长平台验证（未配置 token 时为空列表，不产生任何多余输出）
+    tags += build_verification_tags()
 
     # Open Graph —— 微信 / 微博 / Facebook 等分享卡片依赖这组
     tags += [
