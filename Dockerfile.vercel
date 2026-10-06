@@ -30,20 +30,6 @@ RUN set -e; \
       echo "analytics injected: $f"; \
     done
 
-# GoatCounter stats (dashboard: jdkbachar.goatcounter.com / stats.jdkba.com). Once main's templates
-# carry the snippet themselves (data-goatcounter) this step is a no-op, so a page never counts twice.
-# count.js is served first-party from /static/gc-count.js (gc.zgo.at is unreachable from mainland China).
-ARG GOATCOUNTER_ENDPOINT=https://jdkbachar.goatcounter.com/count
-RUN set -e; \
-    test -s /app/static/gc-count.js || python -c "import urllib.request; urllib.request.urlretrieve('https://gc.zgo.at/count.js', '/app/static/gc-count.js')"; \
-    test "$(wc -c < /app/static/gc-count.js)" -gt 2000; \
-    for f in /app/templates/*.html; do \
-      if grep -q 'data-goatcounter' "$f"; then echo "goatcounter already in $f"; else \
-        python -c "import sys; p, ep = sys.argv[1:]; s = '<!-- goatcounter --><script data-goatcounter=\"%s\" async src=\"/static/gc-count.js\"></script>' % ep; t = open(p, encoding='utf-8').read(); open(p, 'w', encoding='utf-8').write(t.replace('</head>', s + '\n</head>', 1))" "$f" "$GOATCOUNTER_ENDPOINT"; \
-      fi; \
-      test "$(grep -o 'data-goatcounter' "$f" | wc -l)" -eq 1 || { echo "ERROR: expected exactly one goatcounter snippet in $f" >&2; exit 1; }; \
-    done
-
 # 1) Download the ~164MB SQLite DB from GitHub Releases (pinned to v1.0.0) into a read-only location.
 # 2) Point ./data at /tmp/hsdata: the app writes uploaded fonts to data/custom_font.ttf, and on
 #    Vercel only /tmp may be writable. hanzi.db is symlinked back in at container start (see CMD).
