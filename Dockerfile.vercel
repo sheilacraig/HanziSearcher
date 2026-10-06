@@ -1,0 +1,30 @@
+# HanziSearcher on Vercel (Container Images). Only this file is added; no app code changes.
+# Base: python:3.12-alpine (~50MB) + hanzi.db (~164MB) keeps the image under the 250MB function limit.
+FROM python:3.12-alpine
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# Copy only what the server needs at runtime (keeps .git, docs/screenshots etc. out of the image)
+COPY web_server.py ./
+COPY searcher ./searcher
+COPY server ./server
+COPY static ./static
+COPY templates ./templates
+
+# 1) Download the ~164MB SQLite DB from GitHub Releases (pinned to v1.0.0) into a read-only location.
+# 2) Point ./data at /tmp/hsdata: the app writes uploaded fonts to data/custom_font.ttf, and on
+#    Vercel only /tmp may be writable. hanzi.db is symlinked back in at container start (see CMD).
+# 3) Precompile bytecode so cold starts don't recompile.
+RUN mkdir -p /opt/hanzi \
+ && python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/sheilacraig/HanziSearcher/releases/download/v1.0.0/hanzi.db', '/opt/hanzi/hanzi.db')" \
+ && test "$(wc -c < /opt/hanzi/hanzi.db)" -gt 100000000 \
+ && chmod 644 /opt/hanzi/hanzi.db \
+ && ln -s /tmp/hsdata /app/data \
+ && python -m compileall -q /app
+
+# Vercel routes traffic to $PORT (default 80). Do NOT set ENV PORT here; if you change the port,
+# set PORT in Vercel Project Settings > Environment Variables instead.
+CMD ["sh", "-c", "mkdir -p /tmp/hsdata && ln -sf /opt/hanzi/hanzi.db /tmp/hsdata/hanzi.db && exec python web_server.py ${PORT:-80} --host 0.0.0.0"]
