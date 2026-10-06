@@ -32,14 +32,17 @@ STATIC_DIR = "static"
 # 历史问题：无条件下发 Access-Control-Allow-Origin: * 且 do_OPTIONS 主动放行预检，
 # 任意第三方网页可对本机端口发起跨域 fetch，从而静默覆盖 / 删除用户字体文件。
 #
-# 必须包含站点自身域名（BASE_URL）：页面内的 fetch / XHR 会携带 Origin 头，
+# 必须包含站点自身域名（主域名 + 备用域名）：页面内的 fetch / XHR 会携带 Origin 头，
 # 若白名单只列127.0.0.1 与 localhost，部署上线后自身请求会被 403 拦死，
-# 表现为「首页能打开但检索全无结果」。此处从 BASE_URL 自动派生，避免再次漏配。
+# 表现为「首页能打开但检索全无结果」。此处从 seo 的域名配置自动派生，避免再次漏配；
+# 备用域名同样提供完整站点，漏配会导致经备用域名访问时检索失效。
 def _build_allowed_origins() -> tuple:
-    """构造来源白名单：本机回环地址 + 站点自身域名（含 http/https 两种 scheme）"""
+    """构造来源白名单：本机回环地址 + 站点主域名与备用域名（含 http/https 两种 scheme）"""
     origins = ["http://127.0.0.1", "http://localhost", "https://127.0.0.1", "https://localhost"]
-    base = (seo.get_base_url() or "").strip()
-    if base:
+    for base in [seo.get_base_url()] + seo.get_alt_base_urls():
+        base = (base or "").strip().rstrip("/")
+        if not base:
+            continue
         origins.append(base)
         # 同时放行 http 版本，nginx 未强制跳转 https 时仍可用
         if base.startswith("https://"):
@@ -54,7 +57,7 @@ def _origin_in_allowlist(origin: str) -> bool:
     """
     精确判断 Origin 是否在白名单内。
 
-    不能用 startswith 做前缀匹配：那样 https://char.jdkba.com.evil.com
+    不能用 startswith 做前缀匹配：那样 https://站点域名.evil.com
     会因前缀匹配而被误判为合法，等于给跨域绕过留了口子。
 
     解析为 (scheme, host, port) 三元组后比对，并按同 scheme 默认端口归一化：
