@@ -28,6 +28,14 @@ DB_PATH = "data/hanzi.db"
 TEMPLATES_DIR = "templates"
 STATIC_DIR = "static"
 
+# 站长平台验证文件白名单（站点根路径 -> 实际存放于 static/）。
+#
+# 这些文件本体是平台下发的固定内容，无敏感信息，可公开访问；
+# 但路由必须精确匹配文件名，不允许通配 —— 见 _handle_get 中的说明。
+GSC_VERIFY_FILES = frozenset({
+    "/google7edc209a0eca8c73.html",
+})
+
 # 允许的跨域来源白名单。
 # 历史问题：无条件下发 Access-Control-Allow-Origin: * 且 do_OPTIONS 主动放行预检，
 # 任意第三方网页可对本机端口发起跨域 fetch，从而静默覆盖 / 删除用户字体文件。
@@ -370,6 +378,28 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             real_target = os.path.realpath(file_path)
             if (real_target == real_base or real_target.startswith(real_base + os.path.sep)) and os.path.isfile(real_target):
                 self._serve_file(real_target, cache_seconds=0)
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
+
+        # 1.5 站长平台验证文件
+        # Google / 百度等平台的「HTML 文件」验证要求文件位于站点根路径
+        # （如 /google7edc209a0eca8c73.html），而非 /static/ 下，故单独开一条路由。
+        #
+        # 安全约束：此处必须先过 GSC_FILE_WHITELIST，再读取文件。
+        # 若为图省事写成「匹配任意 /xxx.html 再拼路径」，等于新开一条
+        # 带路径穿越面的读文件通道，把 /static/ 那段 realpath 校验的防线绕开了。
+        # 白名单是精确文件名比对，未来新增验证文件必须显式加入集合。
+        if parsed.path in GSC_VERIFY_FILES:
+            rel = parsed.path.lstrip("/")
+            target = os.path.join(STATIC_DIR, rel)
+            real_base = os.path.realpath(STATIC_DIR)
+            real_target = os.path.realpath(target)
+            # 双重保险：即便白名单被误改，也仍受 realpath 边界约束
+            if (real_target.startswith(real_base + os.path.sep)
+                    and os.path.isfile(real_target)):
+                self._serve_file(real_target, content_type="text/html", cache_seconds=0)
             else:
                 self.send_response(404)
                 self.end_headers()

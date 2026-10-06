@@ -187,6 +187,25 @@ kill $(lsof -t -i :8088)
 - **`GET /robots.txt`** — 站点抓取声明
 - **`GET /sitemap.xml`** — 站点地图（未配置站点域名时返回 404）
 - **`GET /static/og-cover.svg`** — 动态生成的社交分享预览图
+- **`GET /<验证文件名>.html`** — 站长平台验证文件（白名单内的固定文件名）
+
+---
+
+## ⚙️ 站点配置
+
+全部配置集中在 `server/seo.py` 顶部，改一处全站生效，无需改动模板：
+
+| 配置项 | 说明 |
+| --- | --- |
+| `BASE_URL` | 站点根地址。canonical / og:url / sitemap 均由它派生；留空则降级为相对路径，且 `/sitemap.xml` 返回 404 |
+| `GSC_VERIFICATION` | Google Search Console 验证串（只填 token 本身，不填整个标签）。留空则不输出该标签 |
+| `BAIDU_VERIFICATION` | 百度站长平台验证串，同上 |
+
+验证标签会同时注入 `/`、`/chars`、`/lego` 三个页面，不必逐页配置。
+
+若平台要求使用「HTML 文件」方式验证，则把下发的文件放入 `static/`，
+并在 `server/handlers.py` 的 `GSC_VERIFY_FILES` 集合中登记其根路径文件名
+（如 `/google7edc209a0eca8c73.html`）。该集合为精确匹配白名单，不解析通配路径。
 
 ---
 
@@ -198,7 +217,7 @@ kill $(lsof -t -i :8088)
 ├── server/               # 服务端核心业务逻辑
 │   ├── handlers.py       # HTTP 请求路由分发、API 处理器与静态资源托管
 │   ├── font_manager.py   # 自定义字体持久化管理与元数据读写
-│   ├── seo.py            # 站点元信息配置（标题、描述、站点域名）
+│   ├── seo.py            # 站点元信息配置（标题、描述、站点域名、站长平台验证）
 │   └── seo_pages.py      # 页面渲染（检索页、乐高页、字表页）
 ├── searcher/             # 检索与构字引擎
 │   ├── __init__.py       # 模块包导出

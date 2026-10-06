@@ -35,11 +35,10 @@
     }
 
     .container {
-      width: 100% !important;
-      max-width: 100% !important;
-      margin: 0 !important;
+      width: 100%;
+      margin: 0 auto;
+      box-sizing: border-box;
       padding: 12px 24px 80px 24px;
-      box-sizing: border-box !important;
     }
 
     /* 顶部导航标题区 */
@@ -1343,3 +1342,403 @@
       z-index: 3000;
       box-shadow: 0 8px 24px rgba(0,0,0,0.25);
     }
+
+/* ========================================================
+   移动端响应式布局优化 (Mobile Responsive Rules)
+   ======================================================== */
+@media (max-width: 768px) {
+  body {
+    padding: 10px 12px 60px 12px;
+    background-size: 16px 16px;
+  }
+
+  .container {
+    padding: 0;
+  }
+
+  /* 顶部导航与品牌标头 */
+  header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .brand-title {
+    justify-content: flex-start;
+  }
+
+  .brand-seal {
+    width: 36px;
+    height: 36px;
+    font-size: 20px;
+    border-radius: 8px;
+  }
+
+  h1 {
+    font-size: 20px;
+  }
+
+  .subtitle-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .header-nav-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 7px 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    border-radius: 12px;
+  }
+
+  /* 综合搜索控制台 */
+  .search-panel {
+    padding: 14px 12px;
+    border-radius: 12px;
+    margin-bottom: 14px;
+  }
+
+  .search-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .input-box-main {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .input-box-main input {
+    padding: 12px 34px 12px 38px;
+    font-size: 16px; /* 避免 iOS 聚焦自动缩放 */
+    border-radius: 10px;
+  }
+
+  .search-prefix-icon {
+    left: 12px;
+    font-size: 14px;
+  }
+
+  .input-box-strokes {
+    flex: 1 1 110px;
+    min-width: 100px;
+    width: auto;
+  }
+
+  .input-box-strokes input {
+    padding: 12px 28px 12px 34px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  .strokes-prefix-icon {
+    left: 10px;
+    font-size: 14px;
+  }
+
+  .search-btn {
+    flex: 1 1 80px;
+    padding: 12px 14px;
+    font-size: 15px;
+    border-radius: 10px;
+  }
+
+  .reset-btn {
+    flex: 0 0 auto;
+    padding: 12px 14px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  /* 快捷体验预设胶囊 */
+  .presets-bar {
+    margin-top: 10px;
+    padding: 4px 0;
+    gap: 6px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .presets-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .presets-label {
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+
+  .preset-chip {
+    flex-shrink: 0;
+    font-size: 12px;
+    padding: 3px 8px;
+  }
+
+  /* 偏旁部首辅助输入折叠面板 */
+  .toolbox-wrapper {
+    margin-top: 10px;
+  }
+
+  .toolbox-toggle-bar {
+    padding: 8px 10px;
+  }
+
+  .toolbox-toggle-tags {
+    display: none; /* 移动端隐藏较长的次要副标题，防止折行杂乱 */
+  }
+
+  .toolbox-toggle-title {
+    font-size: 12px;
+  }
+
+  .toolbox-tabs-header {
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0 4px;
+  }
+
+  .toolbox-tabs-header::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toolbox-tab-btn {
+    padding: 8px 10px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .toolbox-content-panel {
+    padding: 10px 8px;
+  }
+
+  .radicals-flex-grid {
+    gap: 4px;
+  }
+
+  .rad-tag-btn {
+    min-width: 32px;
+    padding: 3px 6px;
+    font-size: 14px;
+  }
+
+  .idc-flex-grid {
+    gap: 6px;
+  }
+
+  .idc-action-btn {
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+
+  .idc-action-btn b {
+    font-size: 15px;
+  }
+
+  .kangxi-stroke-filter-bar {
+    overflow-x: auto;
+    white-space: nowrap;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 6px;
+  }
+
+  .kangxi-stroke-filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .stroke-nav-pill {
+    flex-shrink: 0;
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+
+  .kangxi-scroll-body {
+    max-height: 200px;
+  }
+
+  /* 检索状态条 */
+  .status-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+
+  /* 结果卡片网格 */
+  .results-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .char-card {
+    padding: 12px 12px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .glyph-display {
+    width: 72px;
+    height: 72px;
+    border-radius: 8px;
+  }
+
+  .grid-size-compact .glyph-display {
+    width: 60px;
+    height: 60px;
+  }
+
+  .grid-size-large .glyph-display {
+    width: 82px;
+    height: 82px;
+  }
+
+  .char-prop {
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+
+  /* 分页条 */
+  .pagination-bar {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-top: 20px;
+    border-radius: 12px;
+  }
+
+  .page-nav-btn {
+    padding: 6px 14px;
+    font-size: 13px;
+  }
+
+  .page-info-text {
+    font-size: 12px;
+  }
+
+  .page-jump-box {
+    margin-left: 0;
+    border-left: none;
+    padding-left: 0;
+    width: 100%;
+    justify-content: center;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
+  /* 模态弹窗 */
+  .modal-overlay {
+    padding: 10px;
+  }
+
+  .family-modal,
+  .settings-modal {
+    padding: 18px 14px;
+    border-radius: 14px;
+    max-height: 92vh;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .modal-header-section {
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+  }
+
+  .modal-glyph-large {
+    width: 68px;
+    height: 68px;
+  }
+
+  .modal-char-info h2 {
+    font-size: 20px;
+  }
+
+  .descendant-grid {
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    gap: 6px;
+  }
+
+  .descendant-glyph-box {
+    width: 38px;
+    height: 38px;
+  }
+
+  .descendant-card {
+    padding: 6px 2px;
+  }
+
+  .descendant-card span {
+    font-size: 10px;
+  }
+
+  .setting-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 0;
+  }
+
+  .setting-item-control {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .font-studio-box {
+    padding: 12px 10px;
+  }
+
+  .font-info-wrap {
+    gap: 8px;
+  }
+
+  .font-action-buttons {
+    width: 100%;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .font-tool-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .search-row {
+    gap: 6px;
+  }
+
+  .input-box-strokes {
+    flex: 1 1 90px;
+    min-width: 80px;
+  }
+
+  .search-btn {
+    flex: 1 1 65px;
+    padding: 12px 8px;
+    font-size: 14px;
+  }
+
+  .reset-btn {
+    padding: 12px 10px;
+    font-size: 13px;
+  }
+}
