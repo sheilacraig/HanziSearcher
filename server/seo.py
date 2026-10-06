@@ -4,8 +4,8 @@ SEO 配置与元数据生成模块
 集中管理站点级 SEO 参数，避免 meta 标签散落在各模板中难以统一维护。
 
 设计要点：
-1. BASE_URL 一处配置，canonical / og:url / sitemap 全部由它派生，
-   部署到公网时只需改这一个值。
+1. 域名一处配置（SITE_DOMAIN / ALT_DOMAINS），BASE_URL 及 canonical / og:url / sitemap
+   全部由它派生，部署到公网时只需改这里。
 2. 爬虫与浏览器返回不同内容：爬虫拿到完整静态 HTML（收录需要），
    浏览器拿到的仍是原交互页面（不影响使用体验）——
    依据是Baiduspider / Googlebot 等 UA 特征。
@@ -13,15 +13,27 @@ SEO 配置与元数据生成模块
 
 import html
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # ============ 站点级配置 ============
 
-# 站点根地址（生产环境）。
-# 部署到char.jdkba.com 后 canonical / og:url / sitemap / robots 的 Sitemap 行
+# 站点域名：全项目唯一的域名定义处，其余代码一律引用这里的常量，不得再写死域名。
+# 主域名（生产环境）：canonical / og:url / sitemap / robots 的 Sitemap 行
 # 全部由它派生为绝对地址；留空则降级为相对路径（本地开发可用，但 SEO 效果打折，
 # 且 /sitemap.xml 会返回 404 —— 相对路径的 sitemap 会被搜索引擎直接拒绝）。
-BASE_URL: Optional[str] = "https://char.jdkba.com"
+SITE_DOMAIN: Optional[str] = "hanzi.jdkba.com"
+
+# 备用域名：与主域名提供同一站点、同样可正常访问（不跳转），
+# 仅加入跨域来源白名单；canonical 等 SEO 地址仍统一指向主域名，避免重复收录。
+ALT_DOMAINS: Tuple[str, ...] = ("char.jdkba.com",)
+
+# 站点根地址：由 SITE_DOMAIN 派生，勿单独修改
+BASE_URL: Optional[str] = f"https://{SITE_DOMAIN}" if SITE_DOMAIN else None
+
+# GoatCounter 访问统计上报地址：全项目唯一定义处。由 build_meta_tags 随 SEO 元标签
+# 注入到每个 HTML 页面，模板中不再手写统计脚本；留空则不注入。
+# count.js 自托管于 /static/gc-count.js（官方 CDN gc.zgo.at 在国内无法访问）。
+GOATCOUNTER_ENDPOINT: Optional[str] = "https://jdkbachar.goatcounter.com/count"
 
 SITE_NAME = "HanziSearcher"
 SITE_NAME_CN = "汉字探针"
@@ -68,6 +80,11 @@ PAGE_META: Dict[str, Dict[str, str]] = {
 def get_base_url() -> str:
     """取得站点根地址（去掉末尾斜杠）。未配置 BASE_URL 时返回空串，调用方需降级为相对路径"""
     return (BASE_URL or "").rstrip("/")
+
+
+def get_alt_base_urls() -> List[str]:
+    """取得备用域名的根地址列表（https），供跨域白名单等使用"""
+    return [f"https://{d.strip().rstrip('/')}" for d in ALT_DOMAINS if d and d.strip()]
 
 
 def absolute_url(path: str) -> str:
@@ -178,7 +195,19 @@ def build_meta_tags(
     if is_crawler_view:
         tags.append(build_json_ld(page_key, title, description, canonical))
 
+    stats = build_stats_snippet()
+    if stats:
+        tags.append(stats)
+
     return "\n".join(tags)
+
+
+def build_stats_snippet() -> str:
+    """生成 GoatCounter 统计脚本标签；未配置 GOATCOUNTER_ENDPOINT 时返回空串"""
+    if not GOATCOUNTER_ENDPOINT:
+        return ""
+    return (f'<script data-goatcounter="{_esc(GOATCOUNTER_ENDPOINT)}" '
+            'async src="/static/gc-count.js"></script>')
 
 
 def build_json_ld(page_key: str, title: str, description: str, canonical: str) -> str:
