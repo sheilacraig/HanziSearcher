@@ -779,18 +779,18 @@
       indContainer.innerHTML = Object.keys(effSlots).map(slotKey => {
         const slotDef = effSlots[slotKey];
         const isActive = slotKey === activeSlotKey;
-        // 换算 200x200 viewBox 到 320x320 真实像素 (比例 1.6)
-        const left = (slotDef.x * 1.6).toFixed(1);
-        const top = (slotDef.y * 1.6).toFixed(1);
-        const w = (slotDef.w * 1.6).toFixed(1);
-        const h = (slotDef.h * 1.6).toFixed(1);
+        // 换算 200x200 viewBox 到百分比位置尺寸 (兼容移动端等任意画布尺寸)
+        const left = (slotDef.x / 2).toFixed(2);
+        const top = (slotDef.y / 2).toFixed(2);
+        const w = (slotDef.w / 2).toFixed(2);
+        const h = (slotDef.h / 2).toFixed(2);
 
         const data = legoSlotsData[slotKey] || {};
         const charBadge = data.char ? `· ${esc(data.char)}` : '';
 
         return `
           <div class="slot-rect-indicator ${isActive ? 'active' : ''}" 
-               style="left:${left}px; top:${top}px; width:${w}px; height:${h}px;"
+               style="left:${left}%; top:${top}%; width:${w}%; height:${h}%;"
                onclick="selectActiveSlot('${slotKey}')">
             <span class="slot-pill-tag">${slotKey} ${charBadge}</span>
           </div>
@@ -1479,6 +1479,25 @@
         }
       }
     });
+
+    // 移动端分段快捷平滑滚动
+    window.scrollToLegoSection = function(sec) {
+      const map = {
+        stage: '#legoArtboard',
+        bricks: '#legoSidebarLeft',
+        controls: '#legoTransformPanel',
+        export: '#legoSidebarRight'
+      };
+      const selector = map[sec];
+      if (!selector) return;
+      const el = document.querySelector(selector);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.querySelectorAll('.lego-mobile-nav-btn').forEach(btn => btn.classList.remove('active'));
+        const activeBtn = document.querySelector(`.lego-mobile-nav-btn[data-sec="${sec}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
+      }
+    };
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initLegoApp);

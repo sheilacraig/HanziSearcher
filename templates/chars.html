@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>汉字字表 - 按笔画与部首浏览全量汉字 | HanziSearcher</title>
   <!--SEO_META:chars-->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.2">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.3">
   <style>
     /* 字表页专用样式：与主站视觉一致，但布局为多列字表网格 */
     .chart-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
@@ -57,13 +57,43 @@
     .pager a:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
     .pager .cur { background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 700; }
     .pager .dis { opacity: .4; }
+
+    /* 移动端响应式字表布局 */
+    @media (max-width: 768px) {
+      .chart-wrap { padding: 12px 10px 40px; }
+      .chart-head h1 { font-size: 20px; }
+      .chart-sub { font-size: 12px; line-height: 1.6; }
+      .stroke-nav { gap: 4px; margin: 10px 0 16px; }
+      .stroke-nav a { min-width: 30px; padding: 4px 5px; font-size: 11px; }
+      .stroke-nav .nav-all { padding: 4px 8px; }
+      .char-grid {
+        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+        gap: 6px; margin: 14px 0 20px;
+      }
+      .char-card { padding: 8px 4px 6px; border-radius: 8px; }
+      .char-glyph { font-size: 26px; }
+      .char-py { font-size: 10px; height: 13px; }
+      .char-meta { font-size: 9px; }
+      .char-ids { font-size: 9px; height: 12px; }
+      .pager { gap: 4px; margin: 16px 0; }
+      .pager a, .pager span { padding: 4px 8px; font-size: 12px; }
+      .chart-foot { font-size: 11px; margin-top: 20px; line-height: 1.8; }
+    }
+
+    @media (max-width: 480px) {
+      .char-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 5px;
+      }
+      .char-glyph { font-size: 24px; }
+    }
   </style>
 </head>
 <body>
 <div class="container chart-wrap">
 
-  <header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-    <div class="brand-title" style="display:flex;align-items:center;gap:12px;">
+  <header>
+    <div class="brand-title">
       <div class="brand-seal">字</div>
       <div>
         <h1 style="font-size:20px;font-weight:700;color:var(--primary);margin:0;">汉字字表</h1>
@@ -71,8 +101,8 @@
       </div>
     </div>
     <div class="header-actions">
-      <a href="/" class="header-nav-btn" style="text-decoration:none;" title="返回汉字拆字与部件检索"><span>🔍 拆字检索</span></a>
-      <a href="/lego" class="header-nav-btn" style="text-decoration:none;" title="前往汉字乐高工作台"><span>🧱 汉字乐高</span></a>
+      <a href="/" class="header-nav-btn" title="返回汉字拆字与部件检索"><span>🔍 拆字检索</span></a>
+      <a href="/lego" class="header-nav-btn" title="前往汉字乐高工作台"><span>🧱 汉字乐高</span></a>
     </div>
   </header>
 

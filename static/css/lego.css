@@ -1293,3 +1293,354 @@
 .lego-standalone-workspace .lego-body {
   height: 100%;
 }
+
+/* ==========================================================================
+   📱 汉字乐高移动端响应式布局优化 (Mobile Responsive Rules)
+   ========================================================================== */
+.lego-mobile-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .lego-standalone-body {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .lego-standalone-main {
+    height: auto;
+    overflow: visible;
+    padding: 0 10px 24px 10px;
+  }
+
+  .lego-standalone-workspace {
+    height: auto;
+    overflow: visible;
+    border-radius: 12px;
+  }
+
+  .lego-body {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* 顶部导航栏自适应 */
+  .lego-page-header {
+    padding: 10px 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .lego-page-header .brand-title {
+    justify-content: flex-start;
+  }
+
+  .lego-page-header .subtitle-badge {
+    display: none;
+  }
+
+  .lego-page-header .header-actions {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .lego-page-header .header-actions .header-nav-btn,
+  .lego-page-header .header-actions .lego-tool-btn {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+    padding: 7px 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    border-radius: 10px;
+  }
+
+  /* 移动端快捷分段导航浮条 (吸顶) */
+  .lego-mobile-nav {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    background: #ffffff;
+    border-bottom: 1px solid #ebdcd0;
+    padding: 6px 8px;
+    gap: 6px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .lego-mobile-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .lego-mobile-nav-btn {
+    flex: 1 0 auto;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #e5ded2;
+    background: #faf8f5;
+    color: #555;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+
+  .lego-mobile-nav-btn.active,
+  .lego-mobile-nav-btn:hover {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+
+  /* 移动端排版顺序：
+     1. 舞台画布与骨架 (Stage)
+     2. 部件积木库 (Sidebar Left)
+     3. 姿态微调面板 (Transform Controls)
+     4. 新字档案与导出中心 (Sidebar Right)
+  */
+  .lego-main-stage {
+    order: 1;
+    width: 100%;
+    padding: 14px 10px;
+    overflow: visible;
+  }
+
+  .lego-sidebar-left {
+    order: 2;
+    width: 100%;
+    border-right: none;
+    border-top: 1px solid #ebdcd0;
+    border-bottom: 1px solid #ebdcd0;
+    padding: 14px 12px;
+    overflow: visible;
+  }
+
+  .lego-sidebar-right {
+    order: 3;
+    width: 100%;
+    border-left: none;
+    padding: 14px 12px;
+    overflow: visible;
+  }
+
+  /* 骨架模板列表横向平滑滑动 */
+  .lego-templates-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .lego-templates-list {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .lego-templates-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .lego-tpl-btn {
+    flex-shrink: 0;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  /* 画布与辅助工具 */
+  .lego-canvas-wrapper {
+    width: 100%;
+  }
+
+  .lego-canvas-board {
+    width: min(300px, 86vw);
+    height: min(300px, 86vw);
+    border-radius: 14px;
+  }
+
+  .lego-canvas-tools {
+    width: min(300px, 86vw);
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  .lego-guide-switch,
+  .lego-canvas-actions {
+    gap: 4px;
+  }
+
+  .guide-btn,
+  .canvas-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  /* 插槽选择与微调控制面板 */
+  .lego-transform-panel {
+    width: 100%;
+    padding: 12px 10px;
+    border-radius: 12px;
+  }
+
+  .lego-transform-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .active-slot-pill {
+    font-size: 12px;
+  }
+
+  .slot-subdivide-wrap {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .slot-select-tabs {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .lego-controls-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .control-item {
+    padding: 6px 8px;
+  }
+
+  .control-item label {
+    font-size: 11px;
+  }
+
+  .control-item-buttons {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 8px;
+  }
+
+  .control-item-buttons .lego-mini-btn {
+    flex: 1;
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  /* 部件积木栏 */
+  .lego-disassemble-box {
+    gap: 6px;
+  }
+
+  .lego-input {
+    font-size: 14px;
+  }
+
+  .lego-category-tabs {
+    gap: 4px;
+  }
+
+  .lego-tab {
+    flex: 1;
+    padding: 6px 2px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .lego-bricks-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .lego-comp-brick {
+    height: 52px;
+  }
+
+  /* 导出与档案中心 */
+  .pinyin-input-row {
+    position: relative;
+  }
+
+  .pinyin-keyboard-popover {
+    width: min(230px, 85vw);
+    right: 0;
+  }
+
+  .lego-export-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .lego-btn-export {
+    padding: 10px 8px;
+    font-size: 13px;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* 宝库抽屉 */
+  .lego-vault-drawer {
+    width: 100%;
+    max-width: 360px;
+    right: -100%;
+  }
+
+  .lego-vault-drawer.open {
+    right: 0;
+  }
+
+  /* 宣纸卡片弹窗 */
+  .card-modal-overlay {
+    padding: 10px;
+  }
+
+  .card-modal-box {
+    padding: 16px 12px;
+    width: 100%;
+    max-width: 400px;
+    gap: 12px;
+  }
+
+  .card-preview-area {
+    width: 100%;
+    max-width: 360px;
+    padding: 12px;
+    border-width: 6px;
+  }
+
+  .card-inner-frame {
+    padding: 12px 8px;
+  }
+
+  .card-mizige-box {
+    width: 130px;
+    height: 130px;
+  }
+
+  .card-modal-actions {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+  }
+
+  .card-modal-actions button {
+    flex: 1;
+    padding: 10px;
+  }
+}

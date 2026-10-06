@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>汉字乐高 - HanziSearcher</title>
   <!--SEO_META:lego-->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.2" />
-  <link rel="stylesheet" href="/static/css/lego.css?v=2.2" />
+  <link rel="stylesheet" href="/static/css/style.css?v=2.3" />
+  <link rel="stylesheet" href="/static/css/lego.css?v=2.3" />
   <link rel="icon" href="/static/og-cover.svg" type="image/svg+xml">
 </head>
 <body class="lego-standalone-body">
@@ -41,10 +41,18 @@
   <!-- 汉字乐高独立工作台容器 -->
   <main class="lego-standalone-main">
     <div class="lego-standalone-workspace">
+      <!-- 移动端分段快捷导航浮条 -->
+      <div class="lego-mobile-nav" id="legoMobileNav">
+        <button class="lego-mobile-nav-btn active" type="button" data-sec="stage" onclick="scrollToLegoSection('stage')">🎨 画布舞台</button>
+        <button class="lego-mobile-nav-btn" type="button" data-sec="bricks" onclick="scrollToLegoSection('bricks')">🧱 部件积木</button>
+        <button class="lego-mobile-nav-btn" type="button" data-sec="controls" onclick="scrollToLegoSection('controls')">⚙️ 姿态微调</button>
+        <button class="lego-mobile-nav-btn" type="button" data-sec="export" onclick="scrollToLegoSection('export')">🚀 档案导出</button>
+      </div>
+
       <!-- 工坊主体三栏布局 -->
       <div class="lego-body">
         <!-- 左栏：积木部件栏 -->
-        <div class="lego-sidebar-left">
+        <div class="lego-sidebar-left" id="legoSidebarLeft">
           <!-- 1. 拆字取件机 -->
           <div class="lego-panel-section">
             <div class="lego-section-title">
@@ -94,7 +102,7 @@
         </div>
 
         <!-- 中栏：拼装主舞台与画布 -->
-        <div class="lego-main-stage">
+        <div class="lego-main-stage" id="legoMainStage">
           <!-- 结构骨架模板选择器 -->
           <div class="lego-templates-bar" id="legoTemplatesBar">
             <div class="lego-templates-label">一级骨架:</div>
@@ -215,7 +223,7 @@
         </div>
 
         <!-- 右栏：造字档案与导出中心 -->
-        <div class="lego-sidebar-right">
+        <div class="lego-sidebar-right" id="legoSidebarRight">
           <!-- 1. 新字档案 -->
           <div class="lego-panel-section">
             <div class="lego-section-title">
@@ -341,6 +349,6 @@
   <!-- 全局轻提示浮层 -->
   <div class="copy-toast" id="copyToast">已复制到剪贴板！</div>
 
-  <script src="/static/js/lego.js?v=2.2"></script>
+  <script src="/static/js/lego.js?v=2.3"></script>
 </body>
 </html>
