@@ -184,6 +184,9 @@ kill $(lsof -t -i :8088)
   - 返回：HTML 字表页，含 60 个汉字卡片（拼音 / 笔画 / 部首 / IDS / 码位），每页响应约 25KB
 - **`GET /lego`**（别名 `/lego.html`）— 汉字乐高工作台页面
 - **`GET /`**（别名 `/index.html`）— 汉字检索主页面
+- **`GET /char/<汉字>`** — 单字详情页，含拼音、部首、总笔画与部外笔画、IDS 结构、
+  Unicode 码位，以及同部首、同笔画与简繁异体关联字。路径中的字可直接传中文或百分号编码，
+  `U+6728`、`4E28` 等码位写法同样可访问（canonical 统一指向汉字形式）
 - **`GET /robots.txt`** — 站点抓取声明
 - **`GET /sitemap.xml`** — 站点地图（未配置站点域名时返回 404）
 - **`GET /static/og-cover.svg`** — 动态生成的社交分享预览图
@@ -200,6 +203,7 @@ kill $(lsof -t -i :8088)
 | `BASE_URL` | 站点根地址。canonical / og:url / sitemap 均由它派生；留空则降级为相对路径，且 `/sitemap.xml` 返回 404 |
 | `GSC_VERIFICATION` | Google Search Console 验证串（只填 token 本身，不填整个标签）。留空则不输出该标签 |
 | `BAIDU_VERIFICATION` | 百度站长平台验证串，同上 |
+| `ICP_RECORD` | ICP 备案号。注入全站页脚并链接工信部备案系统；留空则不输出页脚备案信息 |
 
 验证标签会同时注入 `/`、`/chars`、`/lego` 三个页面，不必逐页配置。
 
@@ -226,7 +230,8 @@ kill $(lsof -t -i :8088)
 ├── templates/            # 前端页面模板
 │   ├── index.html        # 汉字检索与部件探针主页面 (/)
 │   ├── lego.html         # 汉字乐高独立工作台页面 (/lego)
-│   └── chars.html        # 汉字字表页 (/chars)
+│   ├── chars.html        # 汉字字表页 (/chars)
+│   └── char.html         # 单字详情页 (/char/<汉字>)
 ├── static/               # 前端静态工程资源
 │   ├── css/
 │   │   ├── style.css     # 主站全局样式、卡片网格、弹窗与响应式设计

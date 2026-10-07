@@ -14,7 +14,7 @@ from searcher.engine import HanziEngine
 from searcher.font_parser import parse_font_file
 from server import seo
 from server import seo_pages
-from server.seo import build_robots, build_sitemap
+from server.seo import build_robots
 from server.font_manager import (
     CUSTOM_FONT_PATH,
     CUSTOM_FONT_META_PATH,
@@ -504,8 +504,9 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         # 11. 站点地图（未配置域名时返回 404，避免输出无效的相对路径 sitemap）
+        # 走 seo_pages 的缓存入口：条目已上万，不能每次请求都重查库、重拼 2.7MB 字符串
         elif parsed.path == "/sitemap.xml":
-            xml_text = build_sitemap(self._build_sitemap_entries())
+            xml_text = seo_pages.get_cached_sitemap(engine)
             if not xml_text:
                 self.send_response(404)
                 self.end_headers()
@@ -517,6 +518,14 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "public, max-age=3600")
                 self.end_headers()
                 self.wfile.write(body)
+
+        # 12.5 单字详情页：站内数量最大的可收录集合（/char/<汉字>）
+        # 路径里的汉字可能是百分号编码（浏览器的正常形态），也可能是直接的中文
+        # （部分客户端不编码），一律先 unquote，再交给引擎做统一归一化。
+        elif parsed.path.startswith("/char/"):
+            self._serve_char_page(
+                urllib.parse.unquote(parsed.path[len("/char/"):]).strip()
+            )
 
         # 13. SEO 字表落地页：服务端渲染真实汉字，供爬虫收录
         elif parsed.path in ("/chars", "/chars.html"):
@@ -591,8 +600,21 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _build_sitemap_entries(self) -> list:
-        return seo_pages.build_sitemap_entries(engine)
+    def _serve_char_page(self, raw: str):
+        """
+        单字详情页：服务端渲染单字档案与关联字内链，供爬虫收录。
+
+        内容基本不变（字形、笔画、部首都是静态数据），缓存一天 ——
+        爬虫批量遍历两万页时，不能让 2 核小机把每次都算一遍。
+        """
+        if not raw:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self._send_html(
+            seo_pages.render_char_page(engine, raw, self._ua()),
+            cache_seconds=86400,
+        )
 
     def do_POST(self):
         if not self._origin_allowed():

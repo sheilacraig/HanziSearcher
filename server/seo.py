@@ -100,6 +100,18 @@ PAGE_META: Dict[str, Dict[str, str]] = {
         "priority": "0.8",
         "freq": "monthly",
     },
+    # 单字详情页（/char/<汉字>）的兜底元数据。
+    # 真实的 title / description 由 render_char_page 按字生成后再覆盖（_swap_meta），
+    # 这里只保证 build_meta_tags 拿得到一份合法默认值。
+    "char": {
+        "title": f"汉字详情 - 拼音部首笔画与 IDS 结构 | {SITE_NAME}",
+        "description": (
+            "单个汉字的完整档案：拼音、部首、总笔画与部外笔画、IDS 结构描述、"
+            "Unicode 码位，并附同部首与同笔画的关联字。"
+        ),
+        "priority": "0.5",
+        "freq": "monthly",
+    },
 }
 
 
@@ -374,6 +386,9 @@ def build_robots(sitemap_url: str = "/sitemap.xml") -> str:
         "Allow: /$",
         "Allow: /chars",
         "Allow: /lego",
+        "",
+        "# 汉字详情页：单字长尾入口，是站内数量最大的可收录集合",
+        "Allow: /char/",
         "",
         "# 接口与查询结果：无收录价值，浪费抓取预算",
         "Disallow: /api/",

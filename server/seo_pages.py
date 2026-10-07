@@ -10,7 +10,7 @@ import html
 import os
 import re
 import urllib.parse
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from server import seo
 
@@ -19,6 +19,15 @@ TEMPLATES_DIR = "templates"
 # SEO 字表页分页边界与每页字数
 SEO_MAX_PAGE = 5_000
 SEO_CHARS_PER_PAGE = 60
+
+# 纳入 sitemap 的汉字码位区间：只收 CJK 基础区（U+4E00~U+9FFF，共 20992 字）。
+#
+# 为什么不把扩展区那 7 万多字一并提交：它们是 GB18030 之外、几乎无人检索的生僻字，
+# 批量生成空壳页推给搜索引擎，会被判定成低质内容农场，反而拖累整站权重。
+# 基础区已覆盖全部简体常用字，长尾价值最高、风险最低。
+# 将来要放开更多区段，改这两个常量即可，其余逻辑自动跟随。
+SEO_INDEX_MIN_CP = 0x4E00
+SEO_INDEX_MAX_CP = 0x9FFF
 
 
 def _total_pages(total: int, page_size: int) -> int:
@@ -268,12 +277,168 @@ def _swap_meta(meta_tags: str, marker: str, new_value: str, attr: str = "name") 
     return meta_tags[:start] + esc_val + meta_tags[end:]
 
 
+# ============ 单字详情页 ============
+
+# 变体字段的展示顺序与中文标签。
+# 库中这些字段形如 "國 U+570B | 髮 U+9AEE"（| 分隔多个字形，每项「汉字 空格 码位」）
+_VARIANT_FIELD_LABELS = (
+    ("simplified", "简体"),
+    ("traditional", "繁体"),
+    ("z_variant", "异体"),
+    ("semantic", "通假／义符"),
+)
+
+
+def _parse_variant_chars(raw: str) -> List[str]:
+    """从变体字段中抽出其中的汉字字形，用于生成内链"""
+    out: List[str] = []
+    for part in (raw or "").split("|"):
+        part = part.strip()
+        if not part:
+            continue
+        head = part.split()[0]
+        # 只认单个非 ASCII 字符（汉字 / 部首），其余（码位残片、空串）一律丢弃
+        if len(head) == 1 and not head.isascii() and head not in out:
+            out.append(head)
+    return out
+
+
+def _char_link(char: str, pinyin: str = "") -> str:
+    """生成一个指向单字详情页的内链卡片"""
+    py = (pinyin or "").split(",")[0].strip()[:12]
+    title = f"{char} {py}".strip()
+    return (
+        f'<a href="/char/{urllib.parse.quote(char)}" '
+        f'title="{html.escape(title, quote=True)}">'
+        f'<span class="g">{html.escape(char, quote=False)}</span>'
+        f'<span class="p">{html.escape(py, quote=False)}</span>'
+        f'</a>'
+    )
+
+
+def _char_links(items: List[Dict[str, object]]) -> str:
+    """把关联字列表渲染成内链卡片组"""
+    if not items:
+        return '<span style="color:#a89e91;font-size:13px;">暂无关联字</span>'
+    return "\n      ".join(
+        _char_link(str(it.get("character", "")), str(it.get("pinyin", "") or ""))
+        for it in items
+    )
+
+
+def _build_variants_html(detail: Dict[str, object], char: str) -> str:
+    """渲染简繁异体等关联字形区块；无数据时返回空串（模板不留空盒子）"""
+    link_tpl = ('<a href="/char/{}" style="color:var(--primary);'
+                'text-decoration:none;font-size:15px;">{}</a>')
+    rows = []
+    for key, label in _VARIANT_FIELD_LABELS:
+        chars = [c for c in _parse_variant_chars(str(detail.get(key) or "")) if c != char]
+        if not chars:
+            continue
+        links = " ".join(
+            link_tpl.format(urllib.parse.quote(c), html.escape(c, quote=False))
+            for c in chars[:8]
+        )
+        rows.append(
+            f'<div><span class="lbl">{label}</span>{links}</div>'
+        )
+    if not rows:
+        return ""
+    return '<div class="ids-box" style="line-height:2.2;">' + "".join(rows) + '</div>'
+
+
+def render_char_page(engine, code_str: str, user_agent: str) -> Optional[Tuple[str, int, str]]:
+    """
+    单字详情页（/char/<汉字>）。
+
+    这是站内数量最大的可收录集合。页内用「同部首 / 同笔画 / 简繁异体」三组
+    真实内部链接互相连通，爬虫沿链接即可持续深入，不必只依赖 sitemap。
+    """
+    detail = engine.get_seo_char_detail(code_str)
+    if not detail:
+        return None
+
+    ch = str(detail["character"])
+    pinyin = str(detail.get("pinyin") or "")
+    pinyin_show = pinyin or "（暂无拼音）"
+    strokes = detail.get("total_strokes")
+    radical = str(detail.get("radical_char") or "") or "—"
+    residual = detail.get("residual_strokes")
+    hex_code = str(detail.get("hex_code") or "")
+    ids = str(detail.get("ids_direct") or "") or "—"
+    block = str(detail.get("block_name") or "") or "—"
+
+    # canonical 一律用汉字形式：/char/木 与 /char/U+6728 都能打开同一页
+    # （引擎统一归一化），不指定 canonical 就是多份重复内容互相竞争。
+    # 注意 /char/6728 这类裸十六进制串不会命中 —— 引擎对纯数字一律按十进制
+    # 解析（防劫持的既有设计，全站一致），4E00 这类含字母的写法才走十六进制。
+    canonical = f"/char/{urllib.parse.quote(ch)}"
+
+    title = (f"{ch}字详解 - 拼音 {pinyin_show}、{strokes} 画、{radical} 部、"
+             f"Unicode {hex_code} | {seo.SITE_NAME}")
+    desc = (f"{ch}（{pinyin_show}），共 {strokes} 画，部首「{radical}」，"
+            f"部外 {residual} 画，Unicode 码位 {hex_code}，所属 {block}。"
+            f"含 IDS 结构描述与同部首、同笔画关联字，可继续拆字检索与部件拼装。")
+
+    meta_tags = seo.build_meta_tags(
+        "char",
+        canonical_path=canonical,
+        extra_keywords=[
+            f"{ch}字", f"{ch}的拼音", f"{ch}的笔画", f"{ch}的部首", f"{ch}字怎么读",
+            f"{radical}部汉字", f"{strokes}画汉字", f"{hex_code} 汉字",
+        ],
+        is_crawler_view=is_crawler(user_agent),
+    )
+    meta_tags = _swap_meta(meta_tags, "title", title)
+    meta_tags = _swap_meta(meta_tags, "og:title", title, attr="property")
+    meta_tags = _swap_meta(meta_tags, "description", desc)
+    meta_tags = _swap_meta(meta_tags, "og:description", desc, attr="property")
+    meta_tags = _swap_meta(meta_tags, "twitter:title", title)
+    meta_tags = _swap_meta(meta_tags, "twitter:description", desc)
+
+    tpl_path = os.path.join(TEMPLATES_DIR, "char.html")
+    try:
+        with open(tpl_path, "r", encoding="utf-8") as f:
+            page_html = f.read()
+    except OSError:
+        return None
+
+    # 模板自带的 title 必须先摘掉，否则与 meta_tags 里的 <title> 并存
+    page_html = re.sub(r"[ \t]*<title>.*?</title>\s*", "\n", page_html,
+                       count=1, flags=re.S)
+    page_html = page_html.replace("<!--SEO_META:char-->", meta_tags)
+    page_html = page_html.replace("<!--SEO_FOOTER-->", seo.build_footer())
+
+    replacements = {
+        "{{CHAR}}": html.escape(ch, quote=False),
+        "{{PINYIN}}": html.escape(pinyin_show, quote=False),
+        "{{STROKES}}": str(strokes),
+        "{{RADICAL}}": html.escape(radical, quote=False),
+        "{{RESIDUAL}}": str(residual if residual is not None else "—"),
+        "{{HEX}}": html.escape(hex_code, quote=False),
+        "{{DECIMAL}}": str(detail.get("code_point")),
+        "{{BLOCK}}": html.escape(block, quote=False),
+        "{{IDS}}": html.escape(ids, quote=False),
+        "{{VARIANTS}}": _build_variants_html(detail, ch),
+        "{{RADICAL_LINKS}}": _char_links(detail.get("siblings_by_radical") or []),
+        "{{STROKE_LINKS}}": _char_links(detail.get("siblings_by_stroke") or []),
+    }
+    for token, value in replacements.items():
+        page_html = page_html.replace(token, value)
+
+    return page_html, 200, "text/html; charset=utf-8"
+
+
 def build_sitemap_entries(engine) -> list:
     """
     构造 sitemap 条目。
 
-    字表页按笔画分片全部纳入：每片都是服务端渲染的独立可抓 URL，
-    通过 /chars?stroke=N 的内部链接互相连通。
+    - 静态页：首页 / 字表 / 乐高
+    - 笔画分片：/chars?stroke=N，服务端渲染且互相连通
+    - 单字详情页：/char/<汉字>，数量最大的一批（基础区 2 万余字）
+
+    详情页是 sitemap 的主体。不提交它们，全站可收录 URL 就只有 50 多条，
+    等于把十万字库的长尾价值整个浪费掉。
     """
     today = datetime.date.today().isoformat()
     entries = []
@@ -295,4 +460,35 @@ def build_sitemap_entries(engine) -> list:
             })
     except Exception:
         pass
+
+    try:
+        for ch in engine.get_seo_indexable_chars(SEO_INDEX_MIN_CP, SEO_INDEX_MAX_CP):
+            entries.append({
+                "loc": f"/char/{urllib.parse.quote(ch)}",
+                "lastmod": today,
+                "priority": "0.5",
+                "freq": "monthly",
+            })
+    except Exception:
+        pass
     return entries
+
+
+# sitemap 进程内缓存。
+#
+# 条目数已上万，每次爬虫来访都重新查库 + 拼 2.7MB 字符串是纯浪费 CPU（生产机只有 2 核）。
+# 按「日期」失效：站点内容本身按天更新，做更细粒度的时间失效没有收益，
+# 反而容易引入时序 bug。进程重启即自然重建。
+_sitemap_cache: Dict[str, str] = {"day": "", "xml": ""}
+
+
+def get_cached_sitemap(engine) -> str:
+    """带缓存的 sitemap 生成入口（未配置域名时返回空串，由调用方 404）"""
+    today = datetime.date.today().isoformat()
+    if _sitemap_cache["day"] == today and _sitemap_cache["xml"]:
+        return _sitemap_cache["xml"]
+    xml = seo.build_sitemap(build_sitemap_entries(engine))
+    if xml:
+        _sitemap_cache["day"] = today
+        _sitemap_cache["xml"] = xml
+    return xml

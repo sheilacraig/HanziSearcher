@@ -153,6 +153,23 @@ def _is_chinese_char(c: str) -> bool:
     )
 
 
+# 康熙部首表（第 1~214 个），用于把 characters.radical 的数字编号还原成部首字。
+# 取值来自 Unicode 康熙部首区 U+2F00~U+2FD5 经 NFKC 归一化后的规范汉字，
+# 与《康熙字典》部首次序一致（如 木 = 75、水 = 85、火 = 86）。
+KANGXI_RADICALS = "一丨丶丿乙亅二亠人儿入八冂冖冫几凵刀力勹匕匚匸十卜卩厂厶又口囗土士夂夊夕大女子宀寸小尢尸屮山巛工己巾干幺广廴廾弋弓彐彡彳心戈戶手支攴文斗斤方无日曰月木欠止歹殳毋比毛氏气水火爪父爻爿片牙牛犬玄玉瓜瓦甘生用田疋疒癶白皮皿目矛矢石示禸禾穴立竹米糸缶网羊羽老而耒耳聿肉臣自至臼舌舛舟艮色艸虍虫血行衣襾見角言谷豆豕豸貝赤走足身車辛辰辵邑酉釆里金長門阜隶隹雨靑非面革韋韭音頁風飛食首香馬骨高髟鬥鬯鬲鬼魚鳥鹵鹿麥麻黃黍黑黹黽鼎鼓鼠鼻齊齒龍龜龠"
+
+
+def _radical_to_char(num) -> str:
+    """把康熙部首编号(1~214)还原为部首字；缺号或越界时返回空串"""
+    try:
+        n = int(num)
+    except (TypeError, ValueError):
+        return ""
+    if 1 <= n <= len(KANGXI_RADICALS):
+        return KANGXI_RADICALS[n - 1]
+    return ""
+
+
 # 常见部首与正字等价映射表（用于合字检索时无缝联想）
 COMPONENT_VARIANTS = {
     '人': ['人', '亻'],
@@ -1040,6 +1057,105 @@ class HanziEngine:
             for r in rows
         ]
         return total, results
+
+    def get_seo_char_detail(self, code_str: str, sibling_limit: int = 24) -> Optional[Dict[str, Any]]:
+        """
+        单字详情页数据源（对应 /char/<汉字>）。
+
+        除单字自身档案外，还返回「同部首」「同笔画」两组关联字：
+        它们既是页面的实质内容，也是把十万张详情页串成内链网络的关键 ——
+        有了这张网，爬虫沿链接就能持续深入，不必只依赖 sitemap。
+
+        与用户检索接口的区别同 get_chars_for_seo：不取 svg_data，
+        避免响应体膨胀（详情页字形按需走 /api/svg）。
+        """
+        code_point = _normalize_code_point(code_str)
+        if code_point is None:
+            return None
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.code_point, c.hex_code, c.character, c.block_name,
+                   c.ids_direct, c.ids_tokens, c.radical, c.residual_strokes,
+                   c.total_strokes, c.pinyin,
+                   v.simplified, v.traditional, v.semantic, v.z_variant
+            FROM characters c
+            LEFT JOIN character_variants v ON c.code_point = v.code_point
+            WHERE c.code_point = ? AND c.total_strokes IS NOT NULL
+        """, (code_point,))
+        row = cursor.fetchone()
+        # total_strokes IS NOT NULL 已滤掉 α ℓ ① 这类占位条目，
+        # 再加一道 CJK 区间校验做双保险，绝不给垃圾条目生成收录页
+        if not row or not _is_chinese_char(row[2]):
+            return None
+
+        detail = {
+            "code_point": row[0],
+            "hex_code": row[1] or f"U+{code_point:04X}",
+            "character": row[2],
+            "block_name": row[3] or "",
+            "ids_direct": row[4] or "",
+            "ids_tokens": row[5] or "",
+            "radical": row[6],
+            "residual_strokes": row[7],
+            "total_strokes": row[8],
+            "pinyin": row[9] or "",
+            "simplified": row[10] or "",
+            "traditional": row[11] or "",
+            "semantic": row[12] or "",
+            "z_variant": row[13] or "",
+        }
+        detail["radical_char"] = _radical_to_char(row[6])
+
+        def _siblings(field: str, value) -> List[Dict[str, Any]]:
+            """
+            取同部首 / 同笔画的关联字。
+
+            排序把基础区(U+4E00~)放最前、扩展 A 其次、其余最后：
+            常用字优先露脸，页面内链也就优先导向真正有人搜的字。
+            两个字段都有索引(idx_radical / idx_strokes)，单次查询毫秒级。
+
+            field 只允许白名单取值 —— 它会被拼进 SQL 的列名位置，
+            虽然调用方只传字面量，仍显式拦一道，杜绝将来被外部输入污染。
+            """
+            if value is None or field not in ("radical", "total_strokes"):
+                return []
+            cursor.execute(f"""
+                SELECT c.character, c.hex_code, c.pinyin, c.total_strokes
+                FROM characters c
+                WHERE c.{field} = ? AND c.total_strokes IS NOT NULL AND c.code_point != ?
+                ORDER BY CASE WHEN c.code_point BETWEEN 0x4E00 AND 0x9FFF THEN 0
+                              WHEN c.code_point BETWEEN 0x3400 AND 0x4DBF THEN 1
+                              ELSE 2 END ASC,
+                         c.code_point ASC
+                LIMIT ?
+            """, (value, code_point, sibling_limit))
+            return [
+                {"character": r[0], "hex_code": r[1] or "",
+                 "pinyin": r[2] or "", "strokes": r[3]}
+                for r in cursor.fetchall()
+            ]
+
+        detail["siblings_by_radical"] = _siblings("radical", row[6])
+        detail["siblings_by_stroke"] = _siblings("total_strokes", row[8])
+        return detail
+
+    def get_seo_indexable_chars(self, min_cp: int = 0x4E00, max_cp: int = 0x9FFF) -> str:
+        """
+        列出指定码位区间内全部可收录汉字，拼成一个字符串返回（供 sitemap 使用）。
+
+        返回拼接后的字符串而非 dict 列表：2 万个字连起来只占约 60KB，
+        等价的 dict 列表则要吃掉好几 MB —— 生产机只有 1.7G 内存，这里省一道。
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT character FROM characters
+            WHERE code_point BETWEEN ? AND ? AND total_strokes IS NOT NULL
+            ORDER BY code_point ASC
+        """, (min_cp, max_cp))
+        return "".join(r[0] for r in cursor.fetchall() if r[0])
 
     def get_component_svg(self, char_or_comp: str) -> Optional[str]:
         """
