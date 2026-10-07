@@ -995,11 +995,7 @@
       align-items: center;
       justify-content: center;
       gap: 16px;
-      background: #ffffff;
       padding: 16px 24px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow-sm);
     }
 
     .page-nav-btn {
@@ -1741,4 +1737,154 @@
     padding: 12px 10px;
     font-size: 13px;
   }
+}
+
+/* ============================================================
+   全站页脚
+   由 server/seo.py::build_footer() 注入，模板占位符 <!--SEO_FOOTER-->。
+   页脚出现在每一张页面上，所以样式集中放在这里，让浏览器缓存复用，
+   而不是每页内联一段重复的样式文本。
+   ============================================================ */
+
+/*
+ * 宽度与居中必须由组件自己定死，不能交给父级：
+ * 首页/字表/详情页把页脚放在 .container（块级）里，而 /lego 的父级是
+ * .lego-standalone-body（display:flex; flex-direction:column）。
+ * 在 flex 上下文里，item 只要带水平 auto margin，align-items:stretch 就失效，
+ * 盒子会按 fit-content 收缩、两块 auto margin 分掉剩余空间 —— 表现就是
+ * 页脚「缩成一团飘在页面中间」。显式 width:100% 才能让它在两种上下文里
+ * 表现一致（再交给 max-width 限宽、margin:auto 居中）。
+ */
+.site-footer {
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 1180px;
+  margin: 44px auto 0;
+  padding: 0 2px;
+  /* 只在 flex 父级（/lego）下生效：别被 flex:1 的 <main> 把页脚压扁；
+     块级上下文里该属性无意义，自动忽略。 */
+  flex-shrink: 0;
+}
+
+/* 顶部分隔线：两端淡出 + 中央菱形，比一条通栏实线更轻盈 */
+.sf-rule {
+  position: relative;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--border) 16%,
+                              var(--border) 84%, transparent 100%);
+}
+.sf-rule::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 5px; height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  background: var(--border);
+  transform: rotate(45deg);
+}
+
+.sf-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 22px 4px 18px;
+}
+
+.sf-brand { display: flex; align-items: center; gap: 12px; }
+
+.sf-seal {
+  flex: 0 0 auto;
+  width: 38px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-serif);
+  font-size: 21px; line-height: 1;
+  color: #fff;
+  background: var(--primary);
+  border-radius: 9px;
+  box-shadow: 0 2px 7px rgba(184, 59, 38, 0.22);
+  user-select: none;
+}
+
+.sf-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.4px;
+}
+.sf-name em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: 7px;
+}
+.sf-tagline {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.sf-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.sf-nav a {
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.sf-nav a:hover {
+  color: var(--primary);
+  background: var(--primary-light);
+  border-color: #f2d9d1;
+}
+
+.sf-legal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 14px 4px 0;
+  border-top: 1px dashed var(--border-light);
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  color: #9aa5a6;
+}
+.sf-legal a {
+  color: #8b9798;
+  text-decoration: none;
+  transition: color .15s;
+}
+.sf-legal a:hover {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sf-sep {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  background: var(--border-light);
+}
+
+@media (max-width: 768px) {
+  .site-footer { margin-top: 30px; }
+  .sf-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px 2px 14px;
+  }
+  .sf-seal { width: 34px; height: 34px; font-size: 19px; border-radius: 8px; }
+  .sf-name { font-size: 14px; }
+  .sf-name em { font-size: 11px; margin-left: 5px; }
+  .sf-tagline { font-size: 11px; }
+  .sf-nav { gap: 3px; }
+  .sf-nav a { padding: 4px 9px; font-size: 12px; }
+  .sf-legal { font-size: 11px; gap: 10px; padding-top: 11px; }
 }

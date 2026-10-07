@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>汉字详情 - 拼音部首笔画与 IDS 结构 | HanziSearcher</title>
+  <!--SEO_META:char-->
+  <link rel="stylesheet" href="/static/css/style.css?v=2.5">
+  <style>
+    /* 单字详情页专用样式：视觉语言与字表页一致，布局改为「大字主视觉 + 信息面板」 */
+    .detail-wrap { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
+
+    .crumb { font-size: 12px; color: #9c9186; margin: 16px 0 14px; line-height: 1.8; }
+    .crumb a { color: var(--primary); text-decoration: none; }
+    .crumb a:hover { text-decoration: underline; }
+    .crumb .sep { margin: 0 4px; opacity: .5; }
+
+    .char-hero {
+      display: flex; align-items: center; gap: 30px;
+      background: #fff; border: 1px solid #e8e0d2; border-radius: 14px;
+      padding: 26px 30px; margin-bottom: 18px;
+    }
+    .char-hero .glyph {
+      flex: 0 0 auto; font-size: 108px; line-height: 1;
+      color: #2c2622; font-family: "Kaiti SC", "STKaiti", serif;
+    }
+    .char-hero .meta-title {
+      font-size: 23px; font-weight: 700; color: var(--primary);
+      margin: 0 0 10px; letter-spacing: .5px;
+    }
+    .char-hero .meta-sub { font-size: 13px; color: #6d635b; line-height: 1.95; margin: 0; }
+    .char-hero .meta-sub b { color: var(--primary); }
+
+    .panel {
+      background: #fff; border: 1px solid #e8e0d2; border-radius: 12px;
+      padding: 20px 22px; margin-bottom: 16px;
+    }
+    .panel h2 {
+      font-size: 15px; font-weight: 700; color: #5a4632;
+      margin: 0 0 14px; padding-bottom: 9px; border-bottom: 1px solid #f0e8db;
+    }
+    .panel h2 .cnt { font-size: 12px; font-weight: 400; color: #a89e91; margin-left: 6px; }
+
+    .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 22px; }
+    .kv .k { font-size: 12px; color: #9c9186; margin-bottom: 3px; }
+    .kv .v { font-size: 14px; color: #2c2622; word-break: break-all; }
+    .kv .v.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+
+    .ids-box {
+      margin-top: 14px; padding: 12px 14px; background: #fdfaf5;
+      border: 1px solid #f0e8db; border-radius: 8px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 15px; color: #5a4632; word-break: break-all; line-height: 1.9;
+    }
+    .ids-box .lbl { font-family: inherit; font-size: 12px; color: #a89e91; margin-right: 8px; }
+
+    .sib-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .sib-list a {
+      display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+      min-width: 54px; padding: 7px 5px; background: #fdfaf5;
+      border: 1px solid #ede4d6; border-radius: 8px;
+      text-decoration: none; transition: all .12s;
+    }
+    .sib-list a:hover { border-color: var(--primary); background: #fff; transform: translateY(-1px); }
+    .sib-list .g { font-size: 21px; line-height: 1.2; color: #2c2622; font-family: "Kaiti SC", "STKaiti", serif; }
+    .sib-list .p { font-size: 10px; color: #b08968; margin-top: 2px; height: 13px; overflow: hidden; }
+
+    .detail-foot { text-align: center; color: #8c7b70; font-size: 12px; margin: 26px 0 6px; line-height: 2; }
+    .detail-foot a { color: var(--primary); text-decoration: none; }
+    .detail-foot a:hover { text-decoration: underline; }
+
+    @media (max-width: 768px) {
+      .detail-wrap { padding: 12px 10px 30px; }
+      .char-hero { gap: 18px; padding: 18px 18px; border-radius: 12px; }
+      .char-hero .glyph { font-size: 76px; }
+      .char-hero .meta-title { font-size: 19px; }
+      .char-hero .meta-sub { font-size: 12px; }
+      .panel { padding: 16px 15px; }
+      .kv { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px 16px; }
+      .sib-list { gap: 5px; }
+      .sib-list a { min-width: 46px; padding: 6px 4px; }
+      .sib-list .g { font-size: 19px; }
+      .detail-foot { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+<div class="container detail-wrap">
+
+  <header>
+    <div class="brand-title">
+      <div class="brand-seal">字</div>
+      <div>
+        <h1 style="font-size:20px;font-weight:700;color:var(--primary);margin:0;">汉字详情</h1>
+        <span class="subtitle-badge">拼音 · 部首 · 笔画 · IDS 结构</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <a href="/" class="header-nav-btn" title="返回汉字拆字与部件检索"><span>🔍 拆字检索</span></a>
+      <a href="/chars" class="header-nav-btn" title="浏览全量汉字字表"><span>📖 汉字字表</span></a>
+      <a href="/lego" class="header-nav-btn" title="前往汉字乐高工作台"><span>🧱 汉字乐高</span></a>
+    </div>
+  </header>
+
+  <nav class="crumb" aria-label="面包屑导航">
+    <a href="/">首页</a><span class="sep">›</span><a href="/chars">汉字字表</a><span class="sep">›</span><a href="/chars?stroke={{STROKES}}">{{STROKES}} 画</a><span class="sep">›</span><span>{{CHAR}}</span>
+  </nav>
+
+  <div class="char-hero">
+    <div class="glyph">{{CHAR}}</div>
+    <div>
+      <h1 class="meta-title">{{CHAR}} {{PINYIN}}</h1>
+      <p class="meta-sub">
+        <b>{{STROKES}}</b> 画 · <b>{{RADICAL}}</b> 部 · Unicode <b>{{HEX}}</b><br>
+        {{BLOCK}}
+      </p>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>基本信息</h2>
+    <div class="kv">
+      <div><div class="k">拼音</div><div class="v">{{PINYIN}}</div></div>
+      <div><div class="k">总笔画</div><div class="v">{{STROKES}} 画</div></div>
+      <div><div class="k">部首</div><div class="v">{{RADICAL}}</div></div>
+      <div><div class="k">部外笔画</div><div class="v">{{RESIDUAL}} 画</div></div>
+      <div><div class="k">Unicode 码位</div><div class="v mono">{{HEX}}</div></div>
+      <div><div class="k">十进制码位</div><div class="v mono">{{DECIMAL}}</div></div>
+      <div><div class="k">所属区段</div><div class="v">{{BLOCK}}</div></div>
+    </div>
+    <div class="ids-box"><span class="lbl">IDS 结构：</span>{{IDS}}</div>
+    {{VARIANTS}}
+  </section>
+
+  <section class="panel">
+    <h2>同部首汉字<span class="cnt">{{RADICAL}} 部</span></h2>
+    <div class="sib-list">{{RADICAL_LINKS}}</div>
+  </section>
+
+  <section class="panel">
+    <h2>同笔画汉字<span class="cnt">{{STROKES}} 画</span></h2>
+    <div class="sib-list">{{STROKE_LINKS}}</div>
+  </section>
+
+  <div class="detail-foot">
+    <a href="/chars">全量汉字字表</a> ·
+    <a href="/chars?stroke={{STROKES}}">{{STROKES}} 画汉字大全</a> ·
+    <a href="/?q={{CHAR}}">拆字检索</a> ·
+    <a href="/lego?char={{CHAR}}">汉字乐高拼装</a>
+  </div>
+
+</div>
+
+<!--全站页脚挂在 body 下，不放进 .detail-wrap（max-width:900px），
+    否则页脚宽度会被详情页容器的窄宽度带着走。-->
+<!--SEO_FOOTER-->
+
+</body>
+</html>

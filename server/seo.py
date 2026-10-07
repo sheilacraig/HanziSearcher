@@ -11,6 +11,7 @@ SEO 配置与元数据生成模块
    依据是Baiduspider / Googlebot 等 UA 特征。
 """
 
+import datetime
 import html
 import json
 from typing import Dict, List, Optional, Tuple
@@ -41,6 +42,18 @@ DEFAULT_LANG = "zh-CN"
 
 # 社交分享预览图（部署时换成真实可访问的绝对 URL）
 OG_IMAGE = "/static/og-cover.svg"
+
+# ============ 备案公示 ============
+
+# ICP 备案号。国内搜索引擎（尤其百度）对未公示备案信息的站点收录意愿很低，
+# 且《互联网信息服务管理办法》要求经营性/非经营性站点在首页底部公示备案号。
+# 留空则页脚不输出备案信息。
+# 注意：这是主域名 jdkba.com 的备案号，子域名 hanzi.jdkba.com 直接继承，
+# 无需单独备案（备案按主域名层级登记）。
+ICP_RECORD: Optional[str] = "京ICP备2024061605号"
+
+# 工信部备案查询地址：备案号必须链接到此，否则不视为有效公示
+ICP_QUERY_URL = "https://beian.miit.gov.cn/"
 
 # ============ 站长平台验证 ============
 
@@ -86,6 +99,18 @@ PAGE_META: Dict[str, Dict[str, str]] = {
             "宣纸造字档案卡生成。"
         ),
         "priority": "0.8",
+        "freq": "monthly",
+    },
+    # 单字详情页（/char/<汉字>）的兜底元数据。
+    # 真实的 title / description 由 render_char_page 按字生成后再覆盖（_swap_meta），
+    # 这里只保证 build_meta_tags 拿得到一份合法默认值。
+    "char": {
+        "title": f"汉字详情 - 拼音部首笔画与 IDS 结构 | {SITE_NAME}",
+        "description": (
+            "单个汉字的完整档案：拼音、部首、总笔画与部外笔画、IDS 结构描述、"
+            "Unicode 码位，并附同部首与同笔画的关联字。"
+        ),
+        "priority": "0.5",
         "freq": "monthly",
     },
 }
@@ -247,6 +272,52 @@ def build_stats_snippet() -> str:
             'async src="/static/gc-count.js"></script>')
 
 
+def build_footer() -> str:
+    """
+    生成全站统一页脚（站点标识 + 站内导航 + 备案公示）。
+
+    由各模板中的 <!--SEO_FOOTER--> 占位符承载，改这一处即全站生效 ——
+    避免「首页加了备案号、/chars 忘了加」这类漏配（备案公示是合规要求，
+    漏一个页面就等于没做）。
+
+    样式放在 static/css/style.css 的 .site-footer 一组规则里，此处不内联：
+    页脚出现在每个页面上，挂在共用 CSS 文件里才能被浏览器缓存复用，
+    而不是每页多传一段重复的样式文本。
+
+    页脚里的三个站内链接是有意为之：既方便用户跳转，也让每张单字详情页
+    都多出指向字表与乐高的内链，对收录有正面作用。
+    """
+    record = (ICP_RECORD or "").strip()
+    if not record:
+        return ""
+
+    year = datetime.date.today().year
+    nav_links = "".join(
+        f'<a href="{href}">{label}</a>'
+        for href, label in (("/", "拆字检索"), ("/chars", "汉字字表"), ("/lego", "汉字乐高"))
+    )
+    return (
+        '<footer class="site-footer">'
+        '<div class="sf-rule" aria-hidden="true"></div>'
+        '<div class="sf-main">'
+        '<div class="sf-brand">'
+        '<span class="sf-seal" aria-hidden="true">字</span>'
+        '<div class="sf-brand-text">'
+        f'<div class="sf-name">{_esc(SITE_NAME_CN)}<em>{_esc(SITE_NAME)}</em></div>'
+        '<p class="sf-tagline">离线汉字拆字与部件检索 · 全量矢量字形</p>'
+        '</div>'
+        '</div>'
+        f'<nav class="sf-nav" aria-label="页脚导航">{nav_links}</nav>'
+        '</div>'
+        '<div class="sf-legal">'
+        f'<span>© {year} {_esc(SITE_NAME)}</span>'
+        '<i class="sf-sep" aria-hidden="true"></i>'
+        f'<a href="{_esc(ICP_QUERY_URL)}" target="_blank" rel="noopener">{_esc(record)}</a>'
+        '</div>'
+        '</footer>'
+    )
+
+
 def build_json_ld(page_key: str, title: str, description: str, canonical: str) -> str:
     """
     生成 JSON-LD 结构化数据。
@@ -339,6 +410,9 @@ def build_robots(sitemap_url: str = "/sitemap.xml") -> str:
         "Allow: /$",
         "Allow: /chars",
         "Allow: /lego",
+        "",
+        "# 汉字详情页：单字长尾入口，是站内数量最大的可收录集合",
+        "Allow: /char/",
         "",
         "# 接口与查询结果：无收录价值，浪费抓取预算",
         "Disallow: /api/",
