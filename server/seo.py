@@ -42,6 +42,18 @@ DEFAULT_LANG = "zh-CN"
 # 社交分享预览图（部署时换成真实可访问的绝对 URL）
 OG_IMAGE = "/static/og-cover.svg"
 
+# ============ 备案公示 ============
+
+# ICP 备案号。国内搜索引擎（尤其百度）对未公示备案信息的站点收录意愿很低，
+# 且《互联网信息服务管理办法》要求经营性/非经营性站点在首页底部公示备案号。
+# 留空则页脚不输出备案信息。
+# 注意：这是主域名 jdkba.com 的备案号，子域名 hanzi.jdkba.com 直接继承，
+# 无需单独备案（备案按主域名层级登记）。
+ICP_RECORD: Optional[str] = "京ICP备2024061605号"
+
+# 工信部备案查询地址：备案号必须链接到此，否则不视为有效公示
+ICP_QUERY_URL = "https://beian.miit.gov.cn/"
+
 # ============ 站长平台验证 ============
 
 # Google Search Console 验证串。
@@ -245,6 +257,29 @@ def build_stats_snippet() -> str:
         return ""
     return (f'<script data-goatcounter="{_esc(GOATCOUNTER_ENDPOINT)}" '
             'async src="/static/gc-count.js"></script>')
+
+
+def build_footer() -> str:
+    """
+    生成全站统一页脚（备案公示）。
+
+    由各模板中的 <!--SEO_FOOTER--> 占位符承载，改这一处即三个页面同时生效，
+    避免「首页加了备案号、/chars 忘了加」这类漏配 —— 备案公示是合规要求，
+    漏一个页面就等于没做。样式内联，免去改三份 CSS。
+    """
+    record = (ICP_RECORD or "").strip()
+    if not record:
+        return ""
+    link_style = "color:#8a7358;text-decoration:none;"
+    return (
+        '<footer style="text-align:center;padding:28px 16px 20px;'
+        'font-size:12px;color:#8a7358;line-height:1.9;">'
+        f'<a href="{_esc(ICP_QUERY_URL)}" target="_blank" rel="noopener" '
+        f'style="{link_style}">{_esc(record)}</a>'
+        '<span style="margin:0 8px;opacity:.5;">·</span>'
+        f'<span>{_esc(SITE_NAME_CN)} {_esc(SITE_NAME)}</span>'
+        '</footer>'
+    )
 
 
 def build_json_ld(page_key: str, title: str, description: str, canonical: str) -> str:

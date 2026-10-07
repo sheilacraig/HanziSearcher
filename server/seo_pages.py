@@ -61,6 +61,7 @@ def render_seo_page(page_key: str, template_name: str, canonical_path: str,
     page_html = re.sub(r"[ \t]*<title>.*?</title>\s*", "\n", page_html,
                        count=1, flags=re.S)
     page_html = page_html.replace(f"<!--SEO_META:{page_key}-->", meta_tags)
+    page_html = page_html.replace("<!--SEO_FOOTER-->", seo.build_footer())
     return page_html, 200, "text/html; charset=utf-8"
 
 
@@ -155,6 +156,7 @@ def render_chars_page(engine, query: str, user_agent: str):
     # 模板自带的 title 同样要先摘掉，避免与 meta_tags 里的 <title> 并存
     page_html = re.sub(r"[ \t]*<title>.*?</title>\s*", "\n", page_html,
                        count=1, flags=re.S)
+    page_html = page_html.replace("<!--SEO_FOOTER-->", seo.build_footer())
 
     # --- 笔画导航：真实内部链接，是页面权重传递的主要路径 ---
     nav_parts = []
