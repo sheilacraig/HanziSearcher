@@ -34,6 +34,7 @@ STATIC_DIR = "static"
 # 但路由必须精确匹配文件名，不允许通配 —— 见 _handle_get 中的说明。
 GSC_VERIFY_FILES = frozenset({
     "/google7edc209a0eca8c73.html",
+    "/baidu_verify_codeva-bKkgx2oKhJ.html",
 })
 
 # 允许的跨域来源白名单。
