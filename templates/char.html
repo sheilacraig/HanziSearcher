@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>汉字详情 - 拼音部首笔画与 IDS 结构 | HanziSearcher</title>
   <!--SEO_META:char-->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.3">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.5">
   <style>
     /* 单字详情页专用样式：视觉语言与字表页一致，布局改为「大字主视觉 + 信息面板」 */
     .detail-wrap { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
@@ -149,7 +149,11 @@
     <a href="/lego?char={{CHAR}}">汉字乐高拼装</a>
   </div>
 
-  <!--SEO_FOOTER-->
 </div>
+
+<!--全站页脚挂在 body 下，不放进 .detail-wrap（max-width:900px），
+    否则页脚宽度会被详情页容器的窄宽度带着走。-->
+<!--SEO_FOOTER-->
+
 </body>
 </html>

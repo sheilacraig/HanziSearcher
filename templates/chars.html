@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>汉字字表 - 按笔画与部首浏览全量汉字 | HanziSearcher</title>
   <!--SEO_META:chars-->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.3">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.5">
   <style>
     /* 字表页专用样式：与主站视觉一致，但布局为多列字表网格 */
     .chart-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
@@ -129,18 +129,13 @@
     {{PAGER}}
   </nav>
 
-  <div class="chart-foot">
-    数据来源：<a href="https://www.unicode.org/charts/unihan.html" rel="nofollow noopener" target="_blank">Unicode Unihan Database</a> ·
-    <a href="https://github.com/cjkvi/cjkvi-ids" rel="nofollow noopener" target="_blank">CJKVI-IDS</a> ·
-    <a href="https://glyphwiki.org/" rel="nofollow noopener" target="_blank">GlyphWiki</a><br>
-    每个汉字可通过
-    <a href="/?q={{SAMPLE_CHAR}}">拆字检索</a> ·
-    <a href="/lego?char={{SAMPLE_CHAR}}">汉字乐高拼装</a> 继续探索 ·
-    <a href="/chars?page=2">下一页</a>
-  </div>
-
-  <!--SEO_FOOTER-->
-
 </div>
+
+<!--全站页脚挂在 body 下，不放进 .chart-wrap。
+    页脚是全站级组件，若留在内容容器内，会被容器的 max-width 决定宽度，
+    导致「同一个组件在不同页面宽度不一样」。见 static/css/style.css 的
+    .site-footer 注释。-->
+<!--SEO_FOOTER-->
+
 </body>
 </html>

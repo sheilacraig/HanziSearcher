@@ -11,6 +11,7 @@ SEO 配置与元数据生成模块
    依据是Baiduspider / Googlebot 等 UA 特征。
 """
 
+import datetime
 import html
 import json
 from typing import Dict, List, Optional, Tuple
@@ -273,23 +274,46 @@ def build_stats_snippet() -> str:
 
 def build_footer() -> str:
     """
-    生成全站统一页脚（备案公示）。
+    生成全站统一页脚（站点标识 + 站内导航 + 备案公示）。
 
-    由各模板中的 <!--SEO_FOOTER--> 占位符承载，改这一处即三个页面同时生效，
-    避免「首页加了备案号、/chars 忘了加」这类漏配 —— 备案公示是合规要求，
-    漏一个页面就等于没做。样式内联，免去改三份 CSS。
+    由各模板中的 <!--SEO_FOOTER--> 占位符承载，改这一处即全站生效 ——
+    避免「首页加了备案号、/chars 忘了加」这类漏配（备案公示是合规要求，
+    漏一个页面就等于没做）。
+
+    样式放在 static/css/style.css 的 .site-footer 一组规则里，此处不内联：
+    页脚出现在每个页面上，挂在共用 CSS 文件里才能被浏览器缓存复用，
+    而不是每页多传一段重复的样式文本。
+
+    页脚里的三个站内链接是有意为之：既方便用户跳转，也让每张单字详情页
+    都多出指向字表与乐高的内链，对收录有正面作用。
     """
     record = (ICP_RECORD or "").strip()
     if not record:
         return ""
-    link_style = "color:#8a7358;text-decoration:none;"
+
+    year = datetime.date.today().year
+    nav_links = "".join(
+        f'<a href="{href}">{label}</a>'
+        for href, label in (("/", "拆字检索"), ("/chars", "汉字字表"), ("/lego", "汉字乐高"))
+    )
     return (
-        '<footer style="text-align:center;padding:28px 16px 20px;'
-        'font-size:12px;color:#8a7358;line-height:1.9;">'
-        f'<a href="{_esc(ICP_QUERY_URL)}" target="_blank" rel="noopener" '
-        f'style="{link_style}">{_esc(record)}</a>'
-        '<span style="margin:0 8px;opacity:.5;">·</span>'
-        f'<span>{_esc(SITE_NAME_CN)} {_esc(SITE_NAME)}</span>'
+        '<footer class="site-footer">'
+        '<div class="sf-rule" aria-hidden="true"></div>'
+        '<div class="sf-main">'
+        '<div class="sf-brand">'
+        '<span class="sf-seal" aria-hidden="true">字</span>'
+        '<div class="sf-brand-text">'
+        f'<div class="sf-name">{_esc(SITE_NAME_CN)}<em>{_esc(SITE_NAME)}</em></div>'
+        '<p class="sf-tagline">离线汉字拆字与部件检索 · 全量矢量字形</p>'
+        '</div>'
+        '</div>'
+        f'<nav class="sf-nav" aria-label="页脚导航">{nav_links}</nav>'
+        '</div>'
+        '<div class="sf-legal">'
+        f'<span>© {year} {_esc(SITE_NAME)}</span>'
+        '<i class="sf-sep" aria-hidden="true"></i>'
+        f'<a href="{_esc(ICP_QUERY_URL)}" target="_blank" rel="noopener">{_esc(record)}</a>'
+        '</div>'
         '</footer>'
     )
 
