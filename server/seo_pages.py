@@ -177,33 +177,8 @@ def render_chars_page(engine, query: str, user_agent: str):
         )
     stroke_nav = "\n    ".join(nav_parts)
 
-    # --- 汉字卡片 ---
-    cards = []
-    for c in chars:
-        ch = html.escape(c["character"], quote=False)
-        py = html.escape((c["pinyin"] or "").split(",")[0][:12], quote=False)
-        bits = []
-        if c["strokes"]:
-            bits.append(f'{c["strokes"]}画')
-        if c["radical"]:
-            bits.append(f'部{html.escape(str(c["radical"]), quote=True)}')
-        if c["hex_code"]:
-            bits.append(html.escape(c["hex_code"], quote=True))
-        ids = html.escape((c["ids"] or "")[:10], quote=True)
-        title = f"{ch} {py} {' '.join(bits)}".strip()
-        cards.append(
-            f'<a class="char-card" href="/?q={urllib.parse.quote(c["character"])}" '
-            f'title="{html.escape(title, quote=True)}">'
-            f'<div class="char-glyph">{ch}</div>'
-            f'<div class="char-py">{py}</div>'
-            f'<div class="char-meta">{" · ".join(bits)}</div>'
-            f'<div class="char-ids">{ids}</div>'
-            f"</a>"
-        )
-    char_cards = "\n    ".join(cards) if cards else (
-        '<div style="grid-column:1/-1;text-align:center;padding:48px;color:#8c7b70;">'
-        "该笔画下暂无数据</div>"
-    )
+    # --- 汉字卡片（与检索结果页共用同一实现，保证两处结构一致）---
+    char_cards = _char_cards_html(chars, "该笔画下暂无数据")
 
     # --- 分页器 ---
     total_pages = _total_pages(total, SEO_CHARS_PER_PAGE)
@@ -248,6 +223,241 @@ def render_chars_page(engine, query: str, user_agent: str):
         ("{{SAMPLE_CHAR}}", html.escape(sample_char, quote=False)),
     ):
         page_html = page_html.replace(token, value)
+
+    return page_html, 200, "text/html; charset=utf-8"
+
+
+# ============ 检索结果页（爬虫视图）============
+
+# 检索结果页每页条数。与前端 app.js 的请求参数保持一致 —— 同一个 URL，
+# 人类与爬虫看到的结果条数不该不同，否则会被视作内容作弊。
+SEARCH_PER_PAGE = 50
+
+# IDS 结构符 -> 中文结构名。
+# 用来把 ⿰氵* 这类检索式翻译成人话：既让 title/description 带上
+# 「氵字旁的字」这类真实搜索词，也让爬虫拿到的标题不是一串符号。
+IDS_STRUCT_NAMES = {
+    "⿰": "左右结构", "⿱": "上下结构", "⿲": "左中右结构", "⿳": "上中下结构",
+    "⿴": "全包围结构", "⿵": "上三包围结构", "⿶": "下三包围结构",
+    "⿷": "左三包围结构", "⿸": "左上包围结构", "⿹": "右上包围结构",
+    "⿺": "左下包围结构", "⿻": "笔画交叠结构",
+}
+
+# 结构符 -> 首个部件所在位置，用于「左为木」这类描述
+IDS_HEAD_POS = {
+    "⿰": "左", "⿱": "上", "⿲": "最左", "⿳": "最上", "⿴": "外围",
+    "⿵": "上部", "⿶": "下部", "⿷": "左侧", "⿸": "左上", "⿹": "右上",
+    "⿺": "左下", "⿻": "",
+}
+
+# 检索页收录阈值：下界挡薄页，上界挡 q=*（10 万条、等同首页）这类过宽查询
+SEARCH_INDEX_MIN_RESULTS = 30
+SEARCH_INDEX_MAX_RESULTS = 20000
+
+# 检索式长度上限：⿰木* 为 3 字符，再留 1 个字符余量
+SEARCH_INDEX_MAX_QUERY_LEN = 4
+
+
+def _char_cards_html(chars, empty_text: str = "没有匹配的汉字") -> str:
+    """
+    把汉字记录渲染成卡片网格。
+
+    /chars 字表页与检索结果页共用此实现，两处卡片结构必须一致 ——
+    爬虫在两类页面上看到的是同一套语义。
+
+    卡片本身是 <a>，指向该字的详情页 /char/<汉字>：详情页才是收录主体，
+    列表页的职责是让爬虫顺着链接一路爬进去。所以 href 必须指向详情页而
+    不是检索页 —— 检索页多数会被判 noindex，导向那边等于把权重送进死路。
+
+    字段名做了兼容：/chars 走 get_chars_for_seo()（strokes / ids），
+    检索走 smart_search()（total_strokes / ids_direct）。
+    """
+    cards = []
+    for c in chars:
+        strokes = c.get("total_strokes") or c.get("strokes")
+        hexc = c.get("hex_code") or ""
+        radical = c.get("radical")
+        ids_raw = c.get("ids_direct") or c.get("ids") or ""
+
+        ch = html.escape(c["character"], quote=False)
+        py = html.escape((c.get("pinyin") or "").split(",")[0][:12], quote=False)
+        bits = []
+        if strokes:
+            bits.append(f"{strokes}画")
+        if radical:
+            bits.append(f"部{html.escape(str(radical), quote=True)}")
+        if hexc:
+            bits.append(html.escape(hexc, quote=True))
+        ids = html.escape(ids_raw[:10], quote=True)
+        title = f"{ch} {py} {' '.join(bits)}".strip()
+        cards.append(
+            f'<a class="char-card" href="/char/{urllib.parse.quote(c["character"])}" '
+            f'title="{html.escape(title, quote=True)}">'
+            f'<div class="char-glyph">{ch}</div>'
+            f'<div class="char-py">{py}</div>'
+            f'<div class="char-meta">{" · ".join(bits)}</div>'
+            f'<div class="char-ids">{ids}</div>'
+            f"</a>"
+        )
+    if cards:
+        return "\n    ".join(cards)
+    return ('<div style="grid-column:1/-1;text-align:center;padding:48px;'
+            f'color:#8c7b70;">{html.escape(empty_text)}</div>')
+
+
+def _describe_ids_query(q: str) -> Tuple[str, List[str]]:
+    """把 IDS 检索式翻译成人类描述与关键词；无法识别时返回 ("", [])"""
+    op = next((c for c in q if c in IDS_STRUCT_NAMES), None)
+    body = [c for c in q if c != op] if op else list(q)
+    named = [c for c in body if c != "*"]
+    if not named:
+        return "", []
+    head = named[0]
+    if op:
+        pos = IDS_HEAD_POS.get(op, "")
+        desc = IDS_STRUCT_NAMES[op] + (f"、{pos}为「{head}」" if pos else f"、含「{head}」")
+    elif "*" in q:
+        desc = f"含「{head}」"
+    else:
+        # 无结构符也无通配：单字的精确匹配，恒 1 条。措辞不能说「含」——
+        # 那不是这个查询的语义（引擎走的是 exact_code 分支）。
+        desc = f"「{head}」"
+    kws = [f"含{head}的汉字", f"{head}部汉字"]
+    if op == "⿰":
+        kws.append(f"{head}字旁的字")
+    if op:
+        kws.append(f"{IDS_STRUCT_NAMES[op]}的汉字")
+    return desc, kws
+
+
+def classify_search_page(q: str, page: int, total: int) -> Tuple[bool, str]:
+    """
+    判断检索结果页能否被搜索引擎收录，返回 (是否收录, 原因)。
+
+    为什么必须白名单：q 是检索框里自由输入的文本，可组合空间无穷
+    （任意字符串 × 笔画 1~64 × 页码），整体放行等于向搜索引擎批量推送
+    空壳页，会被判低质内容农场、反噬整站权重。所以兜底方向固定为
+    「默认不收录」—— 任何解析疏漏都只会落到 noindex 一侧。
+
+    实测各形态产出（engine.smart_search）：
+        q=木    -> exact_code，恒 1 条。它是「精确匹配该字本身」，
+                   而 /char/木 才是这种查询的正确落点，不在这里收录
+        q=*     -> ids_pattern，102999 条，等于全库，与首页重复
+        q=⿰木*  -> 2329 条（左右结构、左为木）
+        q=⿰氵*  -> 2907 条（三点水的字）
+        q=*木*  -> 3088 条（含木的字）
+        q=⿱木*  -> 53 条（结果偏少，接近薄页）
+    """
+    if page != 1:
+        return False, "翻页不单独收录（canonical 已归一回第 1 页）"
+    q = (q or "").strip()
+    if not q:
+        return False, "空查询"
+    if q == "*":
+        return False, "通配全库，与首页内容重复"
+    if len(q) > SEARCH_INDEX_MAX_QUERY_LEN:
+        return False, "检索式过长"
+    # 必须含结构符（如 ⿰氵*）或通配符（如 *木*）之一 —— 这两种写法都表达
+    # 「含某部件」，才可能产出成规模的列表。纯单字走的是 exact_code
+    # 精确匹配、恒 1 条，它的正确落点是 /char/<汉字>，不在这里收录。
+    if not any(c in IDS_STRUCT_NAMES for c in q) and "*" not in q:
+        return False, "非 IDS 模式；单字是精确匹配，正确落点为 /char/<汉字>"
+    if total < SEARCH_INDEX_MIN_RESULTS:
+        return False, f"结果仅 {total} 条，属薄页"
+    if total > SEARCH_INDEX_MAX_RESULTS:
+        return False, f"结果 {total} 条过于宽泛，与首页重复"
+    return True, "IDS 模式检索"
+
+
+def render_search_page(engine, query: str, user_agent: str):
+    """
+    检索结果页的爬虫视图。
+
+    人类访客走 app.js 的交互式检索；这里只服务搜索引擎 —— 把真实结果以
+    「汉字文本 + 指向 /char/<汉字> 的链接」直出。数据源与前端同为
+    engine.smart_search()、每页条数也一致，所以两边结果集相同，差异只在
+    呈现方式（爬虫得文本与链接，人类得 SVG 与交互），不构成内容作弊。
+
+    收录策略见 classify_search_page()：默认 noindex，只有 IDS 模式白名单才
+    index；无论收录与否都保留 follow，让爬虫继续沿页内详情页内链爬走。
+    """
+    qs = urllib.parse.parse_qs(query or "")
+    raw_q = qs.get("q", [""])[0].strip()
+    raw_strokes = qs.get("strokes", [""])[0].strip()
+    raw_page = qs.get("page", ["1"])[0]
+
+    try:
+        page = max(1, int(raw_page))
+    except (TypeError, ValueError):
+        page = 1
+
+    strokes = None
+    if raw_strokes:
+        try:
+            cand = int(raw_strokes)
+            if 1 <= cand <= 64:
+                strokes = cand
+        except (TypeError, ValueError):
+            strokes = None
+
+    result = engine.smart_search(raw_q, strokes=strokes, page=page,
+                                 page_size=SEARCH_PER_PAGE)
+    total = result.get("total_count", 0)
+    chars = result.get("results") or []
+
+    indexable, _reason = classify_search_page(raw_q, page, total)
+
+    # --- 元标签：canonical 一律去掉 page，把分页权重归回第 1 页 ---
+    desc_txt, kws = _describe_ids_query(raw_q) if raw_q else ("", [])
+    # 通配全库时不能把 "*" 直接写进标题
+    label = "全库" if raw_q == "*" else (desc_txt or raw_q or "全库")
+    scope = f"{strokes} 画" if strokes else ""
+    page_title = (f"{scope}{label}的汉字（共 {total:,} 个）"
+                  f" - 汉字拆字检索 | {seo.SITE_NAME}")
+    page_desc = (
+        f"按 IDS 表意文字描述符检索「{raw_q}」的结果：共 {total:,} 个汉字"
+        + (f"，限 {strokes} 画" if strokes else "")
+        + "。每个字附拼音、总笔画、康熙部首与 Unicode 码位，"
+          "可点入查看完整字形档案。"
+    )
+
+    params = {"q": raw_q}
+    if strokes:
+        params["strokes"] = strokes
+    canonical_path = "/?" + urllib.parse.urlencode(params)
+    meta_tags = seo.build_meta_tags(
+        "home", canonical_path=canonical_path, extra_keywords=kws,
+        is_crawler_view=is_crawler(user_agent),
+        robots=("index,follow,max-image-preview:large" if indexable
+                else "noindex,follow"),
+    )
+    meta_tags = _swap_meta(meta_tags, "title", page_title)
+    meta_tags = _swap_meta(meta_tags, "og:title", page_title, attr="property")
+    meta_tags = _swap_meta(meta_tags, "description", page_desc)
+    meta_tags = _swap_meta(meta_tags, "og:description", page_desc, attr="property")
+    meta_tags = _swap_meta(meta_tags, "twitter:title", page_title)
+    meta_tags = _swap_meta(meta_tags, "twitter:description", page_desc)
+
+    tpl_path = os.path.join(TEMPLATES_DIR, "index.html")
+    try:
+        with open(tpl_path, "r", encoding="utf-8") as f:
+            page_html = f.read()
+    except OSError:
+        return None
+
+    page_html = re.sub(r"[ \t]*<title>.*?</title>\s*", "\n", page_html,
+                       count=1, flags=re.S)
+    page_html = page_html.replace("<!--SEO_META:home-->", meta_tags)
+    page_html = page_html.replace("<!--SEO_FOOTER-->", seo.build_footer())
+
+    # 把真实结果注入结果网格：爬虫看到的是汉字文本 + 详情页链接。
+    # 刻意不给分页链接 —— 后续页一律 noindex，让爬虫停在第 1 页就好，
+    # 省下的抓取预算留给 /char/ 那两万张详情页。
+    cards = _char_cards_html(chars, f"没有匹配「{raw_q}」的汉字")
+    page_html = re.sub(
+        r'<div class="results-grid" id="resultsGrid"></div>',
+        lambda _m: f'<div class="results-grid" id="resultsGrid">{cards}</div>',
+        page_html, count=1)
 
     return page_html, 200, "text/html; charset=utf-8"
 

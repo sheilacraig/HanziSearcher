@@ -538,7 +538,19 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
 
         # 15. 根页面与默认检索模板页面
         elif parsed.path in ("/", "/index.html"):
-            self._serve_seo_page("home", "index.html", "/")
+            # 带检索参数的首页：爬虫拿到服务端渲染的真实结果页，人类访客
+            # 维持 app.js 的交互式检索不变 —— 两边同用 engine.smart_search()
+            # 这一个数据源、每页条数也一致，结果集相同，只是呈现方式不同
+            # （爬虫得汉字文本与详情页链接，人类得 SVG 与交互）。
+            rendered = None
+            if "q=" in parsed.query or "strokes=" in parsed.query:
+                if seo_pages.is_crawler(self._ua()):
+                    rendered = seo_pages.render_search_page(
+                        engine, parsed.query, self._ua())
+            if rendered is not None:
+                self._send_html(rendered, cache_seconds=3600)
+            else:
+                self._serve_seo_page("home", "index.html", "/")
 
         # 16. API 路由未命中时返回标准 JSON 404，防止前端收到 HTML 页面
         elif parsed.path.startswith("/api/"):

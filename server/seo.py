@@ -197,7 +197,8 @@ def build_meta_tags(
     page_key: str,
     canonical_path: Optional[str] = None,
     extra_keywords: Optional[List[str]] = None,
-    is_crawler_view: bool = False
+    is_crawler_view: bool = False,
+    robots: str = "index,follow,max-image-preview:large"
 ) -> str:
     """
     生成 <head> 中的全部 SEO / OG / Twitter 元标签。
@@ -205,6 +206,9 @@ def build_meta_tags(
     page_key: PAGE_META 的键
     canonical_path: 该页面的规范路径，默认取 / 或 /chars 等默认值
     is_crawler_view: 爬虫视图下额外注入 JSON-LD 结构化数据
+    robots: robots meta 的取值。检索结果页会传 noindex,follow ——
+        默认值对静态页永远成立，只有「由用户输入派生、组合无穷」的页面
+        才需要按白名单单独收口，见 seo_pages.classify_search_page()。
     """
     meta = PAGE_META.get(page_key, PAGE_META["home"])
     title = meta["title"]
@@ -228,8 +232,10 @@ def build_meta_tags(
         f'<meta name="keywords" content="{_esc(kw_str)}" />',
         f'<meta name="author" content="{_esc(SITE_NAME)}" />',
         f'<link rel="canonical" href="{_esc(canonical)}" />',
-        # 明确告诉爬虫这是简体中文站，避免误判为多语言版本
-        f'<meta name="robots" content="index,follow,max-image-preview:large" />',
+        # 明确告诉爬虫这是简体中文站，避免误判为多语言版本。
+        # 非白名单的检索页传 noindex,follow：保留 follow 是让它继续沿着
+        # 页内的详情页内链爬走，只是不收录这一页本身。
+        f'<meta name="robots" content="{_esc(robots)}" />',
     ]
 
     # 站长平台验证（未配置 token 时为空列表，不产生任何多余输出）
@@ -414,9 +420,18 @@ def build_robots(sitemap_url: str = "/sitemap.xml") -> str:
         "# 汉字详情页：单字长尾入口，是站内数量最大的可收录集合",
         "Allow: /char/",
         "",
-        "# 接口与查询结果：无收录价值，浪费抓取预算",
+        "# 接口：无收录价值且拖慢爬虫",
         "Disallow: /api/",
-        "Disallow: /?",
+        "",
+        "# 检索结果页（/?q=...&strokes=...）不再整体封禁。IDS 模式检索",
+        "# （如 /?q=⿰氵*，即「三点水的字」）是有真实搜索量的长尾入口，",
+        "# 服务端会为爬虫渲染真实结果与专属标题。但 q 是自由输入、组合无穷，",
+        "# 整体放行等于批量产出空壳页，会被判低质内容农场、反伤整站权重。",
+        "# 因此改为「页面级白名单」：默认 noindex，只有白名单形态才 index。",
+        "# 兜底方向是「默认不收录」，任何解析疏漏都不会放行低质页 ——",
+        "# 详见 seo_pages.classify_search_page()。",
+        "# 这里只挡住组合爆得最凶的深分页。",
+        "Disallow: /?page=",
         "",
         "# 社交分享预览图：og:image 与 favicon 引用的路径需要放行",
         "Allow: /static/og-cover.svg",
