@@ -9,7 +9,9 @@ import datetime
 import html
 import os
 import re
+import threading
 import urllib.parse
+from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
 from server import seo
@@ -28,6 +30,57 @@ SEO_CHARS_PER_PAGE = 60
 # 将来要放开更多区段，改这两个常量即可，其余逻辑自动跟随。
 SEO_INDEX_MIN_CP = 0x4E00
 SEO_INDEX_MAX_CP = 0x9FFF
+
+
+# ============ 模板常驻内存 ============
+#
+# 原先每次渲染都 open/read/close 模板文件：单字详情页被爬虫批量遍历时，
+# 2 万次请求就是 2 万次磁盘 I/O。模板在进程生命周期内不变，常驻内存即可。
+_template_cache: Dict[str, str] = {}
+_template_lock = threading.Lock()
+
+
+def _get_template(name: str) -> Optional[str]:
+    """取模板文本（内存常驻，缺失时返回 None，由调用方按原逻辑 404）"""
+    with _template_lock:
+        hit = _template_cache.get(name)
+    if hit is not None:
+        return hit
+    tpl_path = os.path.join(TEMPLATES_DIR, name)
+    try:
+        with open(tpl_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return None
+    with _template_lock:
+        _template_cache[name] = content
+    return content
+
+
+# ============ 单字详情页渲染结果 LRU ============
+#
+# 键为 (汉字, 是否爬虫视图)：爬虫视图与人类视图的 meta 标签不同，必须分开缓存。
+# 未命中不缓存（非法输入的 404 不进缓存，避免被随机 URL 打爆）。
+_CHAR_PAGE_CACHE_CAP = 2000
+_char_page_cache: "OrderedDict[Tuple[str, bool], Tuple[str, int, str]]" = OrderedDict()
+_char_page_lock = threading.Lock()
+
+
+def _char_page_cache_get(key: Tuple[str, bool]):
+    with _char_page_lock:
+        hit = _char_page_cache.get(key)
+        if hit is not None:
+            _char_page_cache.move_to_end(key)
+        return hit
+
+
+def _char_page_cache_put(key: Tuple[str, bool],
+                         value: Tuple[str, int, str]) -> None:
+    with _char_page_lock:
+        _char_page_cache[key] = value
+        _char_page_cache.move_to_end(key)
+        while len(_char_page_cache) > _CHAR_PAGE_CACHE_CAP:
+            _char_page_cache.popitem(last=False)
 
 
 def _total_pages(total: int, page_size: int) -> int:
@@ -51,11 +104,8 @@ def render_seo_page(page_key: str, template_name: str, canonical_path: str,
     并覆盖 <title>。模板本身保持可独立打开（占位符原样保留），
     便于本地直接调试样式。
     """
-    tpl_path = os.path.join(TEMPLATES_DIR, template_name)
-    try:
-        with open(tpl_path, "r", encoding="utf-8") as f:
-            page_html = f.read()
-    except OSError:
+    page_html = _get_template(template_name)
+    if page_html is None:
         return None
 
     meta_tags = seo.build_meta_tags(
@@ -155,11 +205,8 @@ def render_chars_page(engine, query: str, user_agent: str):
     meta_tags = _swap_meta(meta_tags, "twitter:title", page_title)
     meta_tags = _swap_meta(meta_tags, "twitter:description", page_desc)
 
-    tpl_path = os.path.join(TEMPLATES_DIR, "chars.html")
-    try:
-        with open(tpl_path, "r", encoding="utf-8") as f:
-            page_html = f.read()
-    except OSError:
+    page_html = _get_template("chars.html")
+    if page_html is None:
         return None
     page_html = page_html.replace("<!--SEO_META:chars-->", meta_tags)
     # 模板自带的 title 同样要先摘掉，避免与 meta_tags 里的 <title> 并存
@@ -438,11 +485,8 @@ def render_search_page(engine, query: str, user_agent: str):
     meta_tags = _swap_meta(meta_tags, "twitter:title", page_title)
     meta_tags = _swap_meta(meta_tags, "twitter:description", page_desc)
 
-    tpl_path = os.path.join(TEMPLATES_DIR, "index.html")
-    try:
-        with open(tpl_path, "r", encoding="utf-8") as f:
-            page_html = f.read()
-    except OSError:
+    page_html = _get_template("index.html")
+    if page_html is None:
         return None
 
     page_html = re.sub(r"[ \t]*<title>.*?</title>\s*", "\n", page_html,
@@ -569,6 +613,14 @@ def render_char_page(engine, code_str: str, user_agent: str) -> Optional[Tuple[s
         return None
 
     ch = str(detail["character"])
+
+    # 渲染结果缓存：命中则直接返回，跳过模板替换与字符串拼接。
+    # 键用归一化后的汉字（而非原始输入），避免非法输入污染缓存。
+    cache_key = (ch, is_crawler(user_agent))
+    hit = _char_page_cache_get(cache_key)
+    if hit is not None:
+        return hit
+
     pinyin = str(detail.get("pinyin") or "")
     pinyin_show = pinyin or "（暂无拼音）"
     strokes = detail.get("total_strokes")
@@ -606,11 +658,8 @@ def render_char_page(engine, code_str: str, user_agent: str) -> Optional[Tuple[s
     meta_tags = _swap_meta(meta_tags, "twitter:title", title)
     meta_tags = _swap_meta(meta_tags, "twitter:description", desc)
 
-    tpl_path = os.path.join(TEMPLATES_DIR, "char.html")
-    try:
-        with open(tpl_path, "r", encoding="utf-8") as f:
-            page_html = f.read()
-    except OSError:
+    page_html = _get_template("char.html")
+    if page_html is None:
         return None
 
     # 模板自带的 title 必须先摘掉，否则与 meta_tags 里的 <title> 并存
@@ -636,7 +685,9 @@ def render_char_page(engine, code_str: str, user_agent: str) -> Optional[Tuple[s
     for token, value in replacements.items():
         page_html = page_html.replace(token, value)
 
-    return page_html, 200, "text/html; charset=utf-8"
+    result = (page_html, 200, "text/html; charset=utf-8")
+    _char_page_cache_put(cache_key, result)
+    return result
 
 
 def build_sitemap_entries(engine) -> list:

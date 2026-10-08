@@ -242,6 +242,14 @@ class HanziEngine:
         self._pool: List[sqlite3.Connection] = []
         self._pool_lock = threading.Lock()
         self._pool_size = pool_size
+        # 关联字查询缓存（供 get_seo_char_detail）：键为 (字段, 值, 条数上限)，
+        # 值为该字段下完整有序的关联字列表（未排除自身，调用时再过滤）。
+        #
+        # 同一部首 / 同笔画的字共享几乎完全相同的关联列表（仅差被排除的自身），
+        # 缓存后一轮全站抓取的 ~4 万次关联查询降为约 300 次（214 部首 + 64 笔画数）。
+        # 键空间天然有界（字段白名单 2 个），无需淘汰策略。
+        self._siblings_cache: Dict[Tuple[str, Any, int], List[Dict[str, Any]]] = {}
+        self._siblings_lock = threading.Lock()
 
     def get_connection(self) -> sqlite3.Connection:
         """
@@ -1118,24 +1126,43 @@ class HanziEngine:
 
             field 只允许白名单取值 —— 它会被拼进 SQL 的列名位置，
             虽然调用方只传字面量，仍显式拦一道，杜绝将来被外部输入污染。
+
+            缓存：同一部首 / 笔画的关联字列表在所有字之间几乎完全相同
+            （仅差被排除的自身），因此按 (字段, 值, 条数) 缓存完整列表、
+            调用时再过滤自身。一轮全站抓取中这部分查询命中率 >99%。
             """
             if value is None or field not in ("radical", "total_strokes"):
                 return []
-            cursor.execute(f"""
-                SELECT c.character, c.hex_code, c.pinyin, c.total_strokes
-                FROM characters c
-                WHERE c.{field} = ? AND c.total_strokes IS NOT NULL AND c.code_point != ?
-                ORDER BY CASE WHEN c.code_point BETWEEN 0x4E00 AND 0x9FFF THEN 0
-                              WHEN c.code_point BETWEEN 0x3400 AND 0x4DBF THEN 1
-                              ELSE 2 END ASC,
-                         c.code_point ASC
-                LIMIT ?
-            """, (value, code_point, sibling_limit))
+            key = (field, value, sibling_limit)
+            with self._siblings_lock:
+                cached = self._siblings_cache.get(key)
+            if cached is None:
+                # 刻意不带 c.code_point != ? 排除条件，LIMIT 多取 1 条，
+                # 保证过滤自身后仍够数；排序确定（码位 ASC），缓存对所有调用方一致。
+                cursor.execute(f"""
+                    SELECT c.code_point, c.character, c.hex_code, c.pinyin, c.total_strokes
+                    FROM characters c
+                    WHERE c.{field} = ? AND c.total_strokes IS NOT NULL
+                    ORDER BY CASE WHEN c.code_point BETWEEN 0x4E00 AND 0x9FFF THEN 0
+                                  WHEN c.code_point BETWEEN 0x3400 AND 0x4DBF THEN 1
+                                  ELSE 2 END ASC,
+                             c.code_point ASC
+                    LIMIT ?
+                """, (value, sibling_limit + 1))
+                cached = [
+                    {"code_point": r[0], "character": r[1], "hex_code": r[2] or "",
+                     "pinyin": r[3] or "", "strokes": r[4]}
+                    for r in cursor.fetchall()
+                ]
+                with self._siblings_lock:
+                    self._siblings_cache[key] = cached
+            # 过滤自身：与原 SQL 中 code_point != ? 语义完全一致；
+            # 返回形状与原来相同（不带 code_point 键），调用方无感知。
             return [
-                {"character": r[0], "hex_code": r[1] or "",
-                 "pinyin": r[2] or "", "strokes": r[3]}
-                for r in cursor.fetchall()
-            ]
+                {"character": r["character"], "hex_code": r["hex_code"],
+                 "pinyin": r["pinyin"], "strokes": r["strokes"]}
+                for r in cached if r["code_point"] != code_point
+            ][:sibling_limit]
 
         detail["siblings_by_radical"] = _siblings("radical", row[6])
         detail["siblings_by_stroke"] = _siblings("total_strokes", row[8])

@@ -6,6 +6,8 @@ Web 请求处理与 API 路由分发模块
 import json
 import mimetypes
 import os
+import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from typing import Optional, Dict, Any, Tuple
@@ -131,6 +133,41 @@ def _parse_origin(origin: str) -> Optional[Tuple[str, str, Optional[int]]]:
 MAX_PAGE = 10_000
 
 engine = HanziEngine()
+
+# ============ 爬虫限流 ============
+#
+# 同一 IP 的爬虫 UA 在滑动窗口内超过阈值则返回 429（带 Retry-After）。
+# 429 是搜索引擎理解的"慢一点"信号，Googlebot 会退避后重试，不伤收录；
+# 不限流的话，一轮全站抓取 2 天烧光 4 小时 CPU 配额、整站被暂停，收录更惨。
+# 只针对爬虫 UA，人类访客不受影响；/robots.txt 永远放行。
+_CRAWLER_RL_WINDOW_SEC = 60.0
+_CRAWLER_RL_MAX_REQS = 120
+_CRAWLER_RL_MAX_IPS = 5000
+_crawler_rl: Dict[str, list] = {}
+_crawler_rl_lock = threading.Lock()
+
+
+def _crawler_over_limit(client_ip: str) -> bool:
+    """滑动窗口计数：返回 True 表示该爬虫 IP 本窗口已超限"""
+    now = time.monotonic()
+    cutoff = now - _CRAWLER_RL_WINDOW_SEC
+    with _crawler_rl_lock:
+        stamps = _crawler_rl.get(client_ip)
+        if not stamps:
+            _crawler_rl[client_ip] = [now]
+            return False
+        kept = [t for t in stamps if t > cutoff]
+        if len(kept) >= _CRAWLER_RL_MAX_REQS:
+            _crawler_rl[client_ip] = kept
+            return True
+        kept.append(now)
+        _crawler_rl[client_ip] = kept
+        # 防止 IP 维度无限增长：超量时清掉已完全过期的条目
+        if len(_crawler_rl) > _CRAWLER_RL_MAX_IPS:
+            for ip in [k for k, v in _crawler_rl.items()
+                       if not v or v[-1] <= cutoff]:
+                del _crawler_rl[ip]
+        return False
 
 # 初始化 MIME 类型映射
 mimetypes.init()
@@ -365,6 +402,12 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
     def _handle_get(self):
         parsed = urllib.parse.urlparse(self.path)
 
+        # 爬虫限流（/robots.txt 除外）：超限直接 429，不进入后续渲染
+        if parsed.path != "/robots.txt" and seo.is_crawler(self._ua()):
+            if _crawler_over_limit(self.client_address[0]):
+                self._send_429()
+                return
+
         # 0. 社交分享预览图：由服务端动态生成，优先于静态资源路由处理
         if parsed.path == seo.OG_IMAGE:
             self._serve_og_cover()
@@ -567,6 +610,17 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body.encode("utf-8"))
 
+    def _send_429(self):
+        """爬虫超限：429 + Retry-After，请对方 60 秒后再来"""
+        body = b"Too Many Requests: crawler rate limit exceeded, retry later"
+        self.send_response(429)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "60")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _ua(self) -> str:
         """当前请求的 User-Agent"""
         return self.headers.get("User-Agent", "")
@@ -617,8 +671,10 @@ class HanziSearchHandler(BaseHTTPRequestHandler):
         """
         单字详情页：服务端渲染单字档案与关联字内链，供爬虫收录。
 
-        内容基本不变（字形、笔画、部首都是静态数据），缓存一天 ——
-        爬虫批量遍历两万页时，不能让 2 核小机把每次都算一遍。
+        内容基本不变（字形、笔画、部首都是静态数据），三层缓存兜底：
+        模板常驻内存、同部首/同笔画关联查询缓存、渲染结果 LRU（2000 页）。
+        另有爬虫限流：单 IP 60 秒内超 120 次爬虫请求则 429，防一轮全站
+        抓取 2 天烧光 CPU 配额。
         """
         if not raw:
             self.send_response(404)
