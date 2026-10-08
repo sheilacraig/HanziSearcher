@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: hanzisearcher
+    runtime: python
+    plan: free
+    branch: render
+    buildCommand: ./render-build.sh
+    startCommand: python3 web_server.py $PORT --host 0.0.0.0
+    healthCheckPath: /robots.txt
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      # Render 的免费盘无持久化；应用本身只读 SQLite，用户上传的字体
+      # 放到 data/ 下（随实例重建丢失，与 Vercel 上 /tmp 的行为一致，可接受）
